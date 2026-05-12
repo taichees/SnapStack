@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import datetime
+import json
 from pathlib import Path
 
 from app.models import PhotoAnalysis
@@ -23,6 +24,18 @@ CREATE TABLE IF NOT EXISTS photos (
     resolution_score REAL NOT NULL,
     score REAL NOT NULL,
     thumbnail_id TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS scan_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at TEXT NOT NULL,
+    finished_at TEXT NOT NULL,
+    roots TEXT NOT NULL,
+    scanned_files INTEGER NOT NULL,
+    analyzed_files INTEGER NOT NULL,
+    cached_files INTEGER NOT NULL,
+    deleted_cached_files INTEGER NOT NULL,
+    failed_files INTEGER NOT NULL
 );
 """
 
@@ -106,6 +119,76 @@ class AnalysisStore:
                     analysis.thumbnail_id,
                 ),
             )
+
+    def delete_missing_for_roots(self, root_names: list[str], seen_paths: set[Path]) -> int:
+        """今回のスキャンで見つからなかった選択ルート内のDB行を削除します。
+        Deletes cached DB rows for selected roots when they were not seen in this scan.
+        """
+
+        if not root_names:
+            return 0
+
+        seen_path_strings = {str(path) for path in seen_paths}
+        deleted_rows = 0
+        with self._connect() as connection:
+            for root_name in root_names:
+                if seen_path_strings:
+                    placeholders = ",".join("?" for _ in seen_path_strings)
+                    cursor = connection.execute(
+                        f"DELETE FROM photos WHERE root_name = ? AND path NOT IN ({placeholders})",
+                        (root_name, *seen_path_strings),
+                    )
+                else:
+                    cursor = connection.execute("DELETE FROM photos WHERE root_name = ?", (root_name,))
+                deleted_rows += cursor.rowcount
+        return deleted_rows
+
+    def record_scan_run(
+        self,
+        *,
+        started_at: datetime,
+        finished_at: datetime,
+        roots: list[str],
+        scanned_files: int,
+        analyzed_files: int,
+        cached_files: int,
+        deleted_cached_files: int,
+        failed_files: int,
+    ) -> None:
+        """完了したスキャンの概要を履歴として保存します。
+        Stores a completed scan summary as scan history.
+        """
+
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO scan_runs (
+                    started_at, finished_at, roots, scanned_files, analyzed_files,
+                    cached_files, deleted_cached_files, failed_files
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    started_at.isoformat(),
+                    finished_at.isoformat(),
+                    json.dumps(roots),
+                    scanned_files,
+                    analyzed_files,
+                    cached_files,
+                    deleted_cached_files,
+                    failed_files,
+                ),
+            )
+
+    def get_last_scan_finished_at(self) -> str | None:
+        """最後に完了したスキャン時刻を返します。
+        Returns the finished timestamp for the most recent scan run.
+        """
+
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT finished_at FROM scan_runs ORDER BY id DESC LIMIT 1",
+            ).fetchone()
+        return str(row["finished_at"]) if row else None
 
     def _row_to_analysis(self, row: sqlite3.Row) -> PhotoAnalysis:
         """SQLiteの1行をPhotoAnalysisオブジェクトへ戻します。
