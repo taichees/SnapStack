@@ -80,11 +80,38 @@ SNAPSTACK_PHOTO_ROOTS=/photos/camera-roll,/photos/family uvicorn app.main:app
 ## Development
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.txt
 SNAPSTACK_CONFIG=config/snapstack.yml SNAPSTACK_DATA_DIR=.data uvicorn app.main:app --reload
 ```
+
+## Cursor Cloud Agent environment
+
+This repository includes `.cursor/environment.json` and `.cursor/Dockerfile` so
+future Cursor Cloud Agents can start with Docker CLI, Docker Compose, and
+`python3-venv` available.
+
+The environment starts Docker with:
+
+```bash
+sudo service docker start
+```
+
+Useful verification commands inside a new Cloud Agent:
+
+```bash
+docker --version
+docker compose version
+sudo service docker start
+docker run --rm hello-world
+python3 -m venv /tmp/venv-test
+/tmp/venv-test/bin/python --version
+```
+
+If you use Cursor Web's environment setup flow instead of the repo-level
+`.cursor` configuration, open <https://cursor.com/onboard> and ask the setup
+agent to preserve these same Docker and Python requirements.
 
 ## Current limitations
 
