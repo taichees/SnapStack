@@ -1,0 +1,16 @@
+services:
+  snapstack:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./config/snapstack.yml:/config/snapstack.yml:ro
+      - snapstack-data:/data
+      # Example NAS mounts. Edit the left-hand paths for your environment, then
+      # reference the right-hand paths from config/snapstack.yml.
+      - /mnt/nas/photos/camera-roll:/photos/camera-roll:ro
+      - /mnt/nas/photos/family:/photos/family:ro
+      - /mnt/nas/photos/archive:/photos/archive:ro
+
+volumes:
+  snapstack-data:

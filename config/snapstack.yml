@@ -1,0 +1,23 @@
+photo_roots:
+  - name: camera-roll
+    path: /photos/camera-roll
+  - name: family
+    path: /photos/family
+  - name: archive
+    path: /photos/archive
+
+data_dir: /data
+recommendation_count: 3
+
+# Smaller values create stricter groups. Increase slightly if burst photos with
+# motion are split across several groups.
+hash_distance_threshold: 8
+burst_time_window_seconds: 20
+
+image_extensions:
+  - .jpg
+  - .jpeg
+  - .png
+  - .webp
+  - .heic
+  - .heif
