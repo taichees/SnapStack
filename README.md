@@ -8,6 +8,9 @@ The first version is intentionally safe: it reads photos from mounted folders,
 writes thumbnails and analysis cache to Docker storage, and does not delete
 original files.
 
+For implementation notes and design decisions, see
+[`docs/project-summary.md`](docs/project-summary.md).
+
 ## Features
 
 - Multiple target folders can be configured and selected per scan.
