@@ -178,19 +178,7 @@ class _DisjointSet:
 
 
 def _select_recommendations(photos: list[PhotoAnalysis], count: int) -> list[PhotoAnalysis]:
-    selected: list[PhotoAnalysis] = []
-    for photo in photos:
-        if len(selected) >= count:
-            break
-        if all(hamming_distance(photo.phash, chosen.phash) >= 2 for chosen in selected):
-            selected.append(photo)
-
-    for photo in photos:
-        if len(selected) >= count:
-            break
-        if photo not in selected:
-            selected.append(photo)
-    return selected
+    return photos[:count]
 
 
 def _serialize_photo(photo: PhotoAnalysis) -> dict:
