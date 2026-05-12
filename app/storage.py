@@ -29,17 +29,29 @@ CREATE TABLE IF NOT EXISTS photos (
 
 class AnalysisStore:
     def __init__(self, db_path: Path) -> None:
+        """解析キャッシュDBを準備します。
+        Prepares the SQLite cache database for photo analysis results.
+        """
+
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as connection:
             connection.executescript(SCHEMA)
 
     def _connect(self) -> sqlite3.Connection:
+        """行名でアクセスできるSQLite接続を作ります。
+        Opens a SQLite connection with named-column row access.
+        """
+
         connection = sqlite3.connect(self.db_path)
         connection.row_factory = sqlite3.Row
         return connection
 
     def get_valid(self, path: Path, mtime: float, size_bytes: int) -> PhotoAnalysis | None:
+        """ファイルが未変更ならキャッシュ済み解析結果を返します。
+        Returns cached analysis when the file timestamp and size still match.
+        """
+
         with self._connect() as connection:
             row = connection.execute(
                 "SELECT * FROM photos WHERE path = ? AND mtime = ? AND size_bytes = ?",
@@ -50,6 +62,10 @@ class AnalysisStore:
         return self._row_to_analysis(row)
 
     def upsert(self, analysis: PhotoAnalysis) -> None:
+        """最新の解析結果をキャッシュへ追加または更新します。
+        Inserts or updates the cached analysis result.
+        """
+
         with self._connect() as connection:
             connection.execute(
                 """
@@ -92,6 +108,10 @@ class AnalysisStore:
             )
 
     def _row_to_analysis(self, row: sqlite3.Row) -> PhotoAnalysis:
+        """SQLiteの1行をPhotoAnalysisオブジェクトへ戻します。
+        Converts one SQLite row back into a PhotoAnalysis object.
+        """
+
         captured_at = datetime.fromisoformat(row["captured_at"]) if row["captured_at"] else None
         return PhotoAnalysis(
             path=Path(row["path"]),

@@ -21,11 +21,19 @@ templates = Jinja2Templates(directory="app/templates")
 
 
 class ScanRequest(BaseModel):
+    """スキャン対象ルート名のリクエスト本文です。
+    Request body containing the root names selected for scanning.
+    """
+
     root_names: list[str] = []
 
 
 @app.get("/")
 def index(request: Request):
+    """ルート選択と結果表示を行うメイン画面を返します。
+    Renders the main page for selecting roots and viewing scan results.
+    """
+
     return templates.TemplateResponse(
         "index.html",
         {
@@ -38,6 +46,10 @@ def index(request: Request):
 
 @app.get("/api/config")
 def get_config():
+    """UIやデバッグ用に現在の設定を返します。
+    Returns current configuration for the UI and debugging.
+    """
+
     return {
         "photo_roots": [
             {
@@ -55,6 +67,10 @@ def get_config():
 
 @app.post("/api/scan")
 def scan_photos(payload: ScanRequest):
+    """選択された写真ルートをスキャンして類似グループを返します。
+    Scans selected photo roots and returns similar-photo groups.
+    """
+
     try:
         return scanner.scan(payload.root_names)
     except ValueError as exc:
@@ -63,6 +79,10 @@ def scan_photos(payload: ScanRequest):
 
 @app.get("/thumbs/{thumbnail_id}.jpg")
 def get_thumbnail(thumbnail_id: str):
+    """生成済みサムネイル画像を安全に返します。
+    Safely serves a generated thumbnail image.
+    """
+
     if not thumbnail_id.replace("-", "").isalnum():
         raise HTTPException(status_code=404, detail="Thumbnail not found")
     path = settings.data_dir / "thumbnails" / f"{thumbnail_id}.jpg"

@@ -20,12 +20,20 @@ DEFAULT_IMAGE_EXTENSIONS = {
 
 @dataclass(frozen=True)
 class PhotoRoot:
+    """スキャン対象の写真ルートを表します。
+    Represents one configured photo root to scan.
+    """
+
     name: str
     path: Path
 
 
 @dataclass(frozen=True)
 class Settings:
+    """アプリ全体で使う設定値をまとめます。
+    Holds application-wide settings loaded from YAML or environment variables.
+    """
+
     photo_roots: list[PhotoRoot]
     data_dir: Path
     image_extensions: set[str]
@@ -35,11 +43,19 @@ class Settings:
 
 
 def _slugify(value: str) -> str:
+    """表示名や環境変数由来のパスから安全な短い名前を作ります。
+    Builds a safe short name from a display value or path.
+    """
+
     slug = "".join(ch.lower() if ch.isalnum() else "-" for ch in value).strip("-")
     return "-".join(part for part in slug.split("-") if part) or "photos"
 
 
 def _roots_from_env() -> list[PhotoRoot]:
+    """環境変数からカンマ区切りの写真ルート一覧を読み込みます。
+    Loads comma-separated photo roots from the environment.
+    """
+
     raw_roots = os.getenv("SNAPSTACK_PHOTO_ROOTS", "")
     roots: list[PhotoRoot] = []
     for index, raw_path in enumerate(part.strip() for part in raw_roots.split(",") if part.strip()):
@@ -49,6 +65,10 @@ def _roots_from_env() -> list[PhotoRoot]:
 
 
 def _roots_from_config(config: dict[str, Any]) -> list[PhotoRoot]:
+    """YAML設定から複数の写真ルートを読み込みます。
+    Loads multiple photo roots from the YAML configuration.
+    """
+
     roots: list[PhotoRoot] = []
     for index, root in enumerate(config.get("photo_roots", [])):
         if isinstance(root, str):
@@ -62,6 +82,10 @@ def _roots_from_config(config: dict[str, Any]) -> list[PhotoRoot]:
 
 
 def load_settings() -> Settings:
+    """設定ファイルと環境変数を統合してアプリ設定を作ります。
+    Combines config file values and environment variables into Settings.
+    """
+
     config_path = Path(os.getenv("SNAPSTACK_CONFIG", "/config/snapstack.yml"))
     config: dict[str, Any] = {}
     if config_path.exists():

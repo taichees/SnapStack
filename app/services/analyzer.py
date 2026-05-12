@@ -22,6 +22,10 @@ EXIF_DATETIME_TAGS = (36867, 36868, 306)
 
 
 def analyze_photo(path: Path, root_name: str, thumbnail_dir: Path) -> PhotoAnalysis:
+    """画像を読み込み、特徴量・品質スコア・サムネイルを作成します。
+    Reads an image and generates features, quality scores, and a thumbnail.
+    """
+
     stat = path.stat()
     try:
         with Image.open(path) as raw_image:
@@ -66,10 +70,18 @@ def analyze_photo(path: Path, root_name: str, thumbnail_dir: Path) -> PhotoAnaly
 
 
 def hamming_distance(left_hash: str, right_hash: str) -> int:
+    """2つのpHashのハミング距離を計算します。
+    Calculates the Hamming distance between two perceptual hashes.
+    """
+
     return imagehash.hex_to_hash(left_hash) - imagehash.hex_to_hash(right_hash)
 
 
 def _extract_capture_time(image: Image.Image) -> datetime | None:
+    """EXIFから撮影日時を取り出します。
+    Extracts the captured-at timestamp from EXIF metadata.
+    """
+
     try:
         exif = image.getexif()
     except (AttributeError, OSError):
@@ -90,6 +102,10 @@ def _extract_capture_time(image: Image.Image) -> datetime | None:
 
 
 def _quality_scores(image: Image.Image) -> tuple[float, float, float]:
+    """軽量な画像品質スコアを計算します。
+    Computes lightweight image quality scores for sharpness, exposure, and contrast.
+    """
+
     gray = image.convert("L").resize((512, 512))
     values = np.asarray(gray, dtype=np.float32) / 255.0
 
@@ -108,11 +124,19 @@ def _quality_scores(image: Image.Image) -> tuple[float, float, float]:
 
 
 def _thumbnail_id(path: Path, mtime: float, size_bytes: int) -> str:
+    """元画像の状態から安定したサムネイルIDを作ります。
+    Creates a stable thumbnail ID from the source image state.
+    """
+
     digest = hashlib.sha1(f"{path}:{mtime}:{size_bytes}".encode("utf-8")).hexdigest()
     return digest[:24]
 
 
 def _write_thumbnail(image: Image.Image, destination: Path) -> None:
+    """ブラウザ表示用の小さなJPEGサムネイルを書き出します。
+    Writes a small JPEG thumbnail for browser display.
+    """
+
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.exists():
         return

@@ -83,6 +83,8 @@
       const groupTemplate = document.querySelector("#group-template");
       const photoTemplate = document.querySelector("#photo-template");
 
+      // 選択された複数ルートをAPIへ送り、スキャン完了後に結果を描画します。
+      // Sends selected roots to the API and renders results after the scan completes.
       scanButton?.addEventListener("click", async () => {
         const rootNames = [...document.querySelectorAll("input[name='root']:checked")].map((input) => input.value);
         statusBox.hidden = false;
@@ -108,6 +110,8 @@
         }
       });
 
+      // スキャン結果全体をステータス表示とグループカードへ反映します。
+      // Updates the status text and group cards from the full scan response.
       function renderResults(payload) {
         const summary = payload.summary;
         statusBox.textContent =
@@ -139,6 +143,8 @@
         }
       }
 
+      // 1枚の写真データからサムネイルカードを作ります。
+      // Builds a thumbnail card from one photo result.
       function renderPhoto(photo, recommended) {
         const node = photoTemplate.content.cloneNode(true);
         const image = node.querySelector("img");
@@ -154,6 +160,8 @@
         return node;
       }
 
+      // グループの撮影期間とおすすめ枚数を短い説明文にします。
+      // Formats a short summary for capture range and recommendation count.
       function groupMeta(group) {
         const parts = [];
         if (group.captured_start) {

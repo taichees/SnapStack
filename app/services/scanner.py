@@ -14,6 +14,10 @@ from app.storage import AnalysisStore
 
 @dataclass(frozen=True)
 class ScanSummary:
+    """スキャン結果の件数とエラー概要を保持します。
+    Stores counts and error details from one scan run.
+    """
+
     scanned_files: int
     analyzed_files: int
     cached_files: int
@@ -26,11 +30,19 @@ class ScanSummary:
 
 class PhotoScanner:
     def __init__(self, settings: Settings) -> None:
+        """設定に基づいてスキャナーとキャッシュ保存先を初期化します。
+        Initializes the scanner and cache locations from the app settings.
+        """
+
         self.settings = settings
         self.thumbnail_dir = settings.data_dir / "thumbnails"
         self.store = AnalysisStore(settings.data_dir / "snapstack.db")
 
     def scan(self, root_names: Iterable[str] | None = None) -> dict:
+        """選択された複数ルートを走査し、類似写真グループを返します。
+        Scans selected roots and returns grouped similar photos.
+        """
+
         selected_roots = self._select_roots(root_names)
         errors: list[str] = []
         photos: list[PhotoAnalysis] = []
@@ -75,6 +87,10 @@ class PhotoScanner:
         }
 
     def _select_roots(self, root_names: Iterable[str] | None) -> list[PhotoRoot]:
+        """リクエストされたルート名を設定済みPhotoRootに解決します。
+        Resolves requested root names to configured PhotoRoot objects.
+        """
+
         roots_by_name = {root.name: root for root in self.settings.photo_roots}
         requested = [name for name in (root_names or []) if name]
         if not requested:
@@ -86,6 +102,10 @@ class PhotoScanner:
         return [roots_by_name[name] for name in requested]
 
     def _iter_images(self, root: PhotoRoot) -> Iterable[Path]:
+        """指定ルート配下から対応画像ファイルだけを列挙します。
+        Yields supported image files under a configured root.
+        """
+
         if not root.path.exists():
             raise ValueError(f"Photo root does not exist: {root.path}")
         for current_dir, _, filenames in os.walk(root.path):
@@ -95,6 +115,10 @@ class PhotoScanner:
                     yield path
 
     def _group_photos(self, photos: list[PhotoAnalysis]) -> list[dict]:
+        """pHashと撮影時刻を使って写真を類似グループへまとめます。
+        Groups photos by perceptual hash similarity and capture time.
+        """
+
         if len(photos) < 2:
             return []
 
@@ -115,6 +139,10 @@ class PhotoScanner:
         return groups
 
     def _connect_burst_candidates(self, photos: list[PhotoAnalysis], disjoint_set: "_DisjointSet") -> None:
+        """撮影時刻が近い連写候補を同じグループへ接続します。
+        Connects burst candidates captured close together into the same group.
+        """
+
         indexed = sorted(
             enumerate(photos),
             key=lambda item: _timestamp_for_sort(item[1]),
@@ -135,6 +163,10 @@ class PhotoScanner:
             recent.append((index, photo))
 
     def _connect_global_similar_candidates(self, photos: list[PhotoAnalysis], disjoint_set: "_DisjointSet") -> None:
+        """時刻が離れていても見た目が近い写真を代表値比較で接続します。
+        Connects visually similar photos across time using representative hashes.
+        """
+
         representatives: list[int] = []
         for index, photo in enumerate(photos):
             for representative_index in representatives:
@@ -146,6 +178,10 @@ class PhotoScanner:
                 representatives.append(index)
 
     def _serialize_group(self, group_id: int, photos: list[PhotoAnalysis]) -> dict:
+        """1つのグループをAPI/UI向けの辞書形式に変換します。
+        Converts one group into the dictionary shape consumed by the API/UI.
+        """
+
         sorted_photos = sorted(photos, key=lambda photo: (-photo.score, str(photo.path)))
         recommended = _select_recommendations(sorted_photos, self.settings.recommendation_count)
         captured_times = [photo.captured_at for photo in photos if photo.captured_at]
@@ -162,15 +198,27 @@ class PhotoScanner:
 
 class _DisjointSet:
     def __init__(self, size: int) -> None:
+        """グループ結合用のUnion-Find構造を初期化します。
+        Initializes a union-find structure used to merge photo groups.
+        """
+
         self.parent = list(range(size))
 
     def find(self, item: int) -> int:
+        """要素が属するグループ代表を返します。
+        Returns the representative group for an item.
+        """
+
         while self.parent[item] != item:
             self.parent[item] = self.parent[self.parent[item]]
             item = self.parent[item]
         return item
 
     def union(self, left: int, right: int) -> None:
+        """2つの要素が属するグループを結合します。
+        Merges the groups containing two items.
+        """
+
         left_root = self.find(left)
         right_root = self.find(right)
         if left_root != right_root:
@@ -178,10 +226,18 @@ class _DisjointSet:
 
 
 def _select_recommendations(photos: list[PhotoAnalysis], count: int) -> list[PhotoAnalysis]:
+    """スコア順に並んだ写真からおすすめ上位を選びます。
+    Picks the top recommendations from photos already sorted by score.
+    """
+
     return photos[:count]
 
 
 def _serialize_photo(photo: PhotoAnalysis) -> dict:
+    """1枚の解析結果をAPI/UI向けの辞書形式に変換します。
+    Converts one analysis result into the dictionary shape consumed by the API/UI.
+    """
+
     return {
         "path": str(photo.path),
         "basename": photo.basename,
@@ -201,6 +257,10 @@ def _serialize_photo(photo: PhotoAnalysis) -> dict:
 
 
 def _timestamp_for_sort(photo: PhotoAnalysis) -> float:
+    """撮影日時を優先し、無ければ更新時刻を並び替えキーに使います。
+    Uses capture time first, falling back to file modification time for sorting.
+    """
+
     if photo.captured_at:
         return photo.captured_at.timestamp()
     return photo.mtime
