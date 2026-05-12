@@ -40,6 +40,7 @@ def index(request: Request):
             "request": request,
             "photo_roots": settings.photo_roots,
             "recommendation_count": settings.recommendation_count,
+            "last_scan_at": scanner.last_scan_at(),
         },
     )
 
@@ -62,6 +63,7 @@ def get_config():
         "recommendation_count": settings.recommendation_count,
         "hash_distance_threshold": settings.hash_distance_threshold,
         "burst_time_window_seconds": settings.burst_time_window_seconds,
+        "last_scan_at": scanner.last_scan_at(),
     }
 
 

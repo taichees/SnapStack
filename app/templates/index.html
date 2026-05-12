@@ -22,6 +22,9 @@
           <h2>対象フォルダ</h2>
           <button id="scan-button" type="button">選択したフォルダをスキャン</button>
         </div>
+        <p id="last-scan" class="scan-meta" data-last-scan-at="{{ last_scan_at or '' }}">
+          最終スキャン: 未実行
+        </p>
 
         {% if photo_roots %}
           <div class="roots">
@@ -80,8 +83,11 @@
       const scanButton = document.querySelector("#scan-button");
       const statusBox = document.querySelector("#status");
       const results = document.querySelector("#results");
+      const lastScanBox = document.querySelector("#last-scan");
       const groupTemplate = document.querySelector("#group-template");
       const photoTemplate = document.querySelector("#photo-template");
+
+      updateLastScan(lastScanBox?.dataset.lastScanAt);
 
       // 選択された複数ルートをAPIへ送り、スキャン完了後に結果を描画します。
       // Sends selected roots to the API and renders results after the scan completes.
@@ -114,9 +120,11 @@
       // Updates the status text and group cards from the full scan response.
       function renderResults(payload) {
         const summary = payload.summary;
+        updateLastScan(summary.last_scan_at);
         statusBox.textContent =
           `${summary.scanned_files}件を確認、${summary.analyzed_files}件を解析、` +
-          `${summary.cached_files}件はキャッシュを使用。${payload.groups.length}グループを検出しました。`;
+          `${summary.cached_files}件はキャッシュを使用、${summary.deleted_cached_files}件の削除済みキャッシュを掃除。` +
+          `${payload.groups.length}グループを検出しました。`;
 
         if (payload.groups.length === 0) {
           results.innerHTML = "<p class='empty'>類似グループは見つかりませんでした。</p>";
@@ -169,6 +177,19 @@
         }
         parts.push(`おすすめ ${group.recommended.length}枚`);
         return parts.join(" / ");
+      }
+
+      // 最終スキャン時刻をローカル時刻で表示します。
+      // Shows the latest scan timestamp using the browser's local timezone.
+      function updateLastScan(timestamp) {
+        if (!lastScanBox) {
+          return;
+        }
+        if (!timestamp) {
+          lastScanBox.textContent = "最終スキャン: 未実行";
+          return;
+        }
+        lastScanBox.textContent = `最終スキャン: ${new Date(timestamp).toLocaleString()}`;
       }
     </script>
   </body>

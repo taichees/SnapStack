@@ -105,6 +105,7 @@ button:disabled {
 
 .root-card small,
 figcaption small,
+.scan-meta,
 .group-meta {
   display: block;
   color: #716a5d;

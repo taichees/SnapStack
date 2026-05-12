@@ -77,6 +77,15 @@ You can also skip the YAML file and pass comma-separated roots with
 SNAPSTACK_PHOTO_ROOTS=/photos/camera-roll,/photos/family uvicorn app.main:app
 ```
 
+## Scan and cache behavior
+
+- Photos are rechecked when you press the scan button in the browser.
+- Unchanged photos reuse cached analysis from `/data/snapstack.db` and cached
+  thumbnails from `/data/thumbnails`.
+- Cache rows for deleted photos are cleaned from the database for the selected
+  roots during each scan.
+- The UI shows the timestamp of the most recently completed scan.
+
 ## Development
 
 ```bash

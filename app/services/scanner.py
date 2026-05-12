@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
@@ -21,9 +21,11 @@ class ScanSummary:
     scanned_files: int
     analyzed_files: int
     cached_files: int
+    deleted_cached_files: int
     failed_files: int
     grouped_files: int
     ungrouped_files: int
+    last_scan_at: str
     roots: list[str]
     errors: list[str]
 
@@ -44,8 +46,10 @@ class PhotoScanner:
         """
 
         selected_roots = self._select_roots(root_names)
+        started_at = datetime.now(timezone.utc)
         errors: list[str] = []
         photos: list[PhotoAnalysis] = []
+        seen_paths: set[Path] = set()
         scanned_files = 0
         analyzed_files = 0
         cached_files = 0
@@ -53,6 +57,7 @@ class PhotoScanner:
         for root in selected_roots:
             for path in self._iter_images(root):
                 scanned_files += 1
+                seen_paths.add(path)
                 try:
                     stat = path.stat()
                     cached = self.store.get_valid(path, stat.st_mtime, stat.st_size)
@@ -69,15 +74,32 @@ class PhotoScanner:
                 except Exception as exc:
                     errors.append(f"{path}: {exc}")
 
+        deleted_cached_files = self.store.delete_missing_for_roots(
+            [root.name for root in selected_roots],
+            seen_paths,
+        )
         groups = self._group_photos(photos)
         grouped_files = sum(len(group["photos"]) for group in groups)
+        finished_at = datetime.now(timezone.utc)
+        self.store.record_scan_run(
+            started_at=started_at,
+            finished_at=finished_at,
+            roots=[root.name for root in selected_roots],
+            scanned_files=scanned_files,
+            analyzed_files=analyzed_files,
+            cached_files=cached_files,
+            deleted_cached_files=deleted_cached_files,
+            failed_files=len(errors),
+        )
         summary = ScanSummary(
             scanned_files=scanned_files,
             analyzed_files=analyzed_files,
             cached_files=cached_files,
+            deleted_cached_files=deleted_cached_files,
             failed_files=len(errors),
             grouped_files=grouped_files,
             ungrouped_files=max(0, len(photos) - grouped_files),
+            last_scan_at=finished_at.isoformat(),
             roots=[root.name for root in selected_roots],
             errors=errors[:100],
         )
@@ -85,6 +107,13 @@ class PhotoScanner:
             "summary": summary.__dict__,
             "groups": groups,
         }
+
+    def last_scan_at(self) -> str | None:
+        """最後に完了したスキャン時刻を取得します。
+        Returns the timestamp for the most recently completed scan.
+        """
+
+        return self.store.get_last_scan_finished_at()
 
     def _select_roots(self, root_names: Iterable[str] | None) -> list[PhotoRoot]:
         """リクエストされたルート名を設定済みPhotoRootに解決します。
