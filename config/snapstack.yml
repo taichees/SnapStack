@@ -1,10 +1,6 @@
 photo_roots:
-  - name: camera-roll
-    path: /photos/camera-roll
-  - name: family
-    path: /photos/family
-  - name: archive
-    path: /photos/archive
+  - name: snapstack
+    path: /photos/snapstack
 
 data_dir: /data
 recommendation_count: 3

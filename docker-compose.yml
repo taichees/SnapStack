@@ -3,14 +3,17 @@ services:
     build: .
     ports:
       - "8000:8000"
+    environment:
+      # UI から追加するローカルパスはこのプレフィックス配下のみ（コンテナ内パス）
+      SNAPSTACK_UI_LOCAL_PREFIXES: /photos/snapstack,/photos/cloud,/photos/icloud
     volumes:
       - ./config/snapstack.yml:/config/snapstack.yml:ro
       - snapstack-data:/data
-      # Example NAS mounts. Edit the left-hand paths for your environment, then
-      # reference the right-hand paths from config/snapstack.yml.
-      - /mnt/nas/photos/camera-roll:/photos/camera-roll:ro
-      - /mnt/nas/photos/family:/photos/family:ro
-      - /mnt/nas/photos/archive:/photos/archive:ro
+      # メインの写真フォルダ（ホストのこのディレクトリがコンテナの /photos/snapstack になる）
+      - ${SNAPSTACK_PHOTOS_HOST:-${HOME}/snapstack}:/photos/snapstack:ro
+      # Google Drive / Dropbox 等（任意。使わない場合はホスト側パスを無効にするか行をコメント）
+      - "${SNAPSTACK_CLOUD_STORAGE_HOST:-${HOME}/Library/CloudStorage}:/photos/cloud:ro"
+      - "${SNAPSTACK_ICLOUD_HOST:-${HOME}/Library/Mobile Documents}:/photos/icloud:ro"
 
 volumes:
   snapstack-data:

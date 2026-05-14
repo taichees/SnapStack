@@ -17,7 +17,7 @@
         </p>
       </header>
 
-      <section class="panel">
+      <section class="panel" id="roots-panel" data-ui-prefixes="{{ ui_local_prefixes | join(', ') }}">
         <div class="panel-heading">
           <h2>対象フォルダ</h2>
           <button id="scan-button" type="button">選択したフォルダをスキャン</button>
@@ -26,27 +26,71 @@
           最終スキャン: 未実行
         </p>
 
-        {% if photo_roots %}
-          <div class="roots">
-            {% for root in photo_roots %}
-              <label class="root-card">
-                <input type="checkbox" name="root" value="{{ root.name }}" checked />
-                <span>
-                  <strong>{{ root.name }}</strong>
-                  <small>{{ root.path }}</small>
-                </span>
-              </label>
+        {% if root_cards %}
+          <div class="roots" id="roots-list">
+            {% for card in root_cards %}
+              <div class="root-card">
+                <label class="root-card-main">
+                  <input type="checkbox" name="root" value="{{ card.name }}" checked />
+                  <span>
+                    <strong>{{ card.name }}</strong>
+                    <small>{{ card.subtitle }}</small>
+                  </span>
+                </label>
+                {% if card.managed %}
+                  <button type="button" class="btn-ghost remove-root" data-name="{{ card.name }}">削除</button>
+                {% endif %}
+              </div>
             {% endfor %}
           </div>
         {% else %}
-          <p class="empty">
+          <p class="empty" id="roots-empty">
             写真フォルダが未設定です。<code>config/snapstack.yml</code>または
-            <code>SNAPSTACK_PHOTO_ROOTS</code>で複数ルートを設定してください。
+            <code>SNAPSTACK_PHOTO_ROOTS</code>で NAS 等を設定するか、下のフォームからクラウド同期フォルダを追加してください。
           </p>
         {% endif %}
       </section>
 
-      <section id="status" class="status" hidden></section>
+      <section class="panel panel-muted">
+        <h2>クラウド同期・WebDAV を追加</h2>
+        <p class="hint">
+          Google Drive / iCloud Drive / Dropbox / Amazon Photos などは、Docker でホストの同期フォルダを
+          <code>/photos/cloud</code> や <code>/photos/icloud</code> にマウントしたうえで、その<strong>コンテナ内の絶対パス</strong>を指定してください。
+          許可されたプレフィックス: <code id="allowed-prefixes">{{ ui_local_prefixes | join(", ") or "（未設定）" }}</code>
+        </p>
+
+        <h3>同期フォルダ（ローカルマウント）</h3>
+        <form id="form-add-local" class="form-row">
+          <input name="name" type="text" placeholder="表示名（例: gdrive-camera）" required />
+          <input name="path" type="text" placeholder="/photos/cloud/GoogleDrive-…/Album" required />
+          <button type="submit">追加</button>
+        </form>
+
+        <h3>WebDAV</h3>
+        <form id="form-add-webdav" class="form-stack">
+          <div class="form-row">
+            <input name="name" type="text" placeholder="表示名" required />
+            <input name="base_url" type="url" placeholder="https://example.com/remote.php/webdav/" required />
+          </div>
+          <div class="form-row">
+            <input name="username" type="text" placeholder="ユーザー名（任意）" />
+            <input name="password" type="password" placeholder="パスワード（任意）" />
+            <input name="remote_path" type="text" placeholder="リモートフォルダ（例: Photos）" />
+          </div>
+          <button type="submit">WebDAV を追加</button>
+        </form>
+        <p id="ui-roots-message" class="form-message" role="status"></p>
+      </section>
+
+      <section id="status" class="status" hidden>
+        <div id="status-message" class="status-message"></div>
+        <div id="status-progress" class="status-progress" hidden>
+          <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+            <div id="progress-fill" class="progress-fill"></div>
+          </div>
+          <p id="status-detail" class="status-detail"></p>
+        </div>
+      </section>
       <section id="results" class="results"></section>
     </main>
 
@@ -72,9 +116,10 @@
       <figure class="photo-card">
         <img alt="" loading="lazy" />
         <figcaption>
-          <strong></strong>
-          <span></span>
-          <small></small>
+          <strong class="photo-basename"></strong>
+          <span class="photo-path"></span>
+          <span class="photo-score"></span>
+          <small class="photo-meta"></small>
         </figcaption>
       </figure>
     </template>
@@ -82,6 +127,11 @@
     <script>
       const scanButton = document.querySelector("#scan-button");
       const statusBox = document.querySelector("#status");
+      const statusMessage = document.querySelector("#status-message");
+      const statusProgressWrap = document.querySelector("#status-progress");
+      const progressFill = document.querySelector("#progress-fill");
+      const statusDetail = document.querySelector("#status-detail");
+      const progressTrack = document.querySelector(".progress-track");
       const results = document.querySelector("#results");
       const lastScanBox = document.querySelector("#last-scan");
       const groupTemplate = document.querySelector("#group-template");
@@ -89,14 +139,89 @@
 
       updateLastScan(lastScanBox?.dataset.lastScanAt);
 
+      let progressTimer = null;
+
+      function stopProgressPoll() {
+        if (progressTimer !== null) {
+          clearInterval(progressTimer);
+          progressTimer = null;
+        }
+      }
+
+      function phaseLabel(phase) {
+        const labels = {
+          idle: "待機中",
+          enumerating: "写真ファイルを列挙しています",
+          analyzing: "サムネイル生成と解析を実行しています",
+          grouping: "類似グループを計算しています",
+        };
+        return labels[phase] || phase;
+      }
+
+      function applyProgressUI(p) {
+        if (!statusMessage || !statusProgressWrap || !progressFill || !statusDetail || !progressTrack) {
+          return;
+        }
+        statusMessage.textContent = phaseLabel(p.phase);
+        const total = Number(p.total) || 0;
+        const current = Number(p.current) || 0;
+        const hasNumeric = p.phase === "analyzing" && total > 0;
+        statusProgressWrap.hidden = !hasNumeric && p.phase !== "enumerating";
+        if (p.phase === "enumerating") {
+          statusProgressWrap.hidden = false;
+          progressFill.style.width = "100%";
+          progressFill.classList.add("is-indeterminate");
+          progressTrack.removeAttribute("aria-valuenow");
+          const n = current > 0 ? `${current.toLocaleString()} 件見つかりました` : "フォルダを走査しています…";
+          statusDetail.textContent = p.last_file ? `${n}（直近: ${p.last_file}）` : n;
+          return;
+        }
+        progressFill.classList.remove("is-indeterminate");
+        if (hasNumeric) {
+          const pct = Math.min(100, Math.round((current / total) * 100));
+          progressFill.style.width = `${pct}%`;
+          progressTrack.setAttribute("aria-valuenow", String(pct));
+          const tail = p.last_file ? ` — ${p.last_file}` : "";
+          statusDetail.textContent = `${current.toLocaleString()} / ${total.toLocaleString()} 件${tail}`;
+          return;
+        }
+        if (p.phase === "grouping") {
+          statusProgressWrap.hidden = false;
+          progressFill.style.width = "100%";
+          progressFill.classList.add("is-indeterminate");
+          progressTrack.removeAttribute("aria-valuenow");
+          statusDetail.textContent = "枚数が多いと数分かかることがあります";
+          return;
+        }
+        statusDetail.textContent = "";
+      }
+
+      async function pollProgressOnce() {
+        try {
+          const response = await fetch("/api/scan/progress");
+          const payload = await response.json();
+          applyProgressUI(payload);
+        } catch {
+          /* ignore */
+        }
+      }
+
       // 選択された複数ルートをAPIへ送り、スキャン完了後に結果を描画します。
       // Sends selected roots to the API and renders results after the scan completes.
       scanButton?.addEventListener("click", async () => {
         const rootNames = [...document.querySelectorAll("input[name='root']:checked")].map((input) => input.value);
         statusBox.hidden = false;
-        statusBox.textContent = "スキャン中です。写真枚数が多い場合は時間がかかります...";
+        if (statusMessage) {
+          statusMessage.textContent = "スキャンを開始しました…";
+        }
+        if (statusDetail) {
+          statusDetail.textContent = "";
+        }
         results.innerHTML = "";
         scanButton.disabled = true;
+        stopProgressPoll();
+        progressTimer = setInterval(pollProgressOnce, 450);
+        pollProgressOnce();
 
         try {
           const response = await fetch("/api/scan", {
@@ -106,12 +231,18 @@
           });
           const payload = await response.json();
           if (!response.ok) {
-            throw new Error(payload.detail || "Scan failed");
+            throw new Error(detailFromResponse(payload));
           }
           renderResults(payload);
         } catch (error) {
-          statusBox.textContent = `エラー: ${error.message}`;
+          if (statusMessage) {
+            statusMessage.textContent = `エラー: ${error.message}`;
+          }
+          if (statusProgressWrap) {
+            statusProgressWrap.hidden = true;
+          }
         } finally {
+          stopProgressPoll();
           scanButton.disabled = false;
         }
       });
@@ -121,13 +252,32 @@
       function renderResults(payload) {
         const summary = payload.summary;
         updateLastScan(summary.last_scan_at);
-        statusBox.textContent =
-          `${summary.scanned_files}件を確認、${summary.analyzed_files}件を解析、` +
-          `${summary.cached_files}件はキャッシュを使用、${summary.deleted_cached_files}件の削除済みキャッシュを掃除。` +
-          `${payload.groups.length}グループを検出しました。`;
+        if (statusMessage) {
+          statusMessage.textContent =
+            `${summary.scanned_files}件を確認、${summary.analyzed_files}件を解析、` +
+            `${summary.cached_files}件はキャッシュを使用、${summary.deleted_cached_files}件の削除済みキャッシュを掃除。` +
+            `${payload.groups.length}グループを検出しました。`;
+        }
+        if (statusProgressWrap) {
+          statusProgressWrap.hidden = true;
+        }
+        if (progressFill) {
+          progressFill.classList.remove("is-indeterminate");
+          progressFill.style.width = "100%";
+        }
 
         if (payload.groups.length === 0) {
-          results.innerHTML = "<p class='empty'>類似グループは見つかりませんでした。</p>";
+          if (summary.scanned_files === 0) {
+            results.innerHTML =
+              "<p class='empty'><strong>対象ルート内に、スキャン対象の画像ファイルが1件も見つかりませんでした。</strong><br />" +
+              "サブフォルダも再帰的に探します。次を確認してください。<br />" +
+              "・ルートに設定したパス（例: <code>~/Pictures/your-album</code>）の<strong>直下またはその配下</strong>に、実際に写真があるか。<br />" +
+              "・Finder で見ているフォルダのパスが、設定と同じか（別の場所の <code>20260413</code> になっていないか）。<br />" +
+              "・拡張子が対応形式か（JPG / PNG / WebP / HEIC 等）。<strong>動画の .MTS は現バージョンでは対象外</strong>です。</p>";
+          } else {
+            results.innerHTML =
+              "<p class='empty'>類似グループは見つかりませんでした。（画像は列挙できましたが、条件に合う「似た写真の塊」がありませんでした）</p>";
+          }
           return;
         }
 
@@ -158,9 +308,12 @@
         const image = node.querySelector("img");
         image.src = photo.thumbnail_url;
         image.alt = photo.basename;
-        node.querySelector("strong").textContent = photo.basename;
-        node.querySelector("span").textContent = `総合スコア ${Math.round(photo.score * 100)} / 100`;
-        node.querySelector("small").textContent =
+        node.querySelector(".photo-basename").textContent = photo.basename;
+        const pathEl = node.querySelector(".photo-path");
+        pathEl.textContent = photo.path || "";
+        pathEl.hidden = !photo.path;
+        node.querySelector(".photo-score").textContent = `総合スコア ${Math.round(photo.score * 100)} / 100`;
+        node.querySelector(".photo-meta").textContent =
           `${photo.width}x${photo.height} / ${photo.captured_at || "撮影日時なし"}`;
         if (recommended) {
           node.querySelector(".photo-card").classList.add("is-recommended");
@@ -191,6 +344,98 @@
         }
         lastScanBox.textContent = `最終スキャン: ${new Date(timestamp).toLocaleString()}`;
       }
+
+      const uiMsg = document.querySelector("#ui-roots-message");
+
+      function showUiMsg(text, isError) {
+        if (!uiMsg) {
+          return;
+        }
+        uiMsg.textContent = text;
+        uiMsg.classList.toggle("is-error", Boolean(isError));
+      }
+
+      function detailFromResponse(payload) {
+        const detail = payload?.detail;
+        if (typeof detail === "string") {
+          return detail;
+        }
+        if (Array.isArray(detail)) {
+          return detail.map((item) => (typeof item === "object" && item?.msg ? item.msg : JSON.stringify(item))).join("; ");
+        }
+        return "リクエストに失敗しました";
+      }
+
+      document.querySelector("#form-add-local")?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const form = event.target;
+        const data = new FormData(form);
+        const body = { name: String(data.get("name") || ""), path: String(data.get("path") || "") };
+        try {
+          const response = await fetch("/api/ui-roots/local", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          const payload = await response.json();
+          if (!response.ok) {
+            throw new Error(detailFromResponse(payload));
+          }
+          showUiMsg("追加しました。再読み込みします…", false);
+          window.location.reload();
+        } catch (error) {
+          showUiMsg(error.message, true);
+        }
+      });
+
+      document.querySelector("#form-add-webdav")?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const data = new FormData(event.target);
+        const body = {
+          name: String(data.get("name") || ""),
+          base_url: String(data.get("base_url") || ""),
+          username: String(data.get("username") || ""),
+          password: String(data.get("password") || ""),
+          remote_path: String(data.get("remote_path") || ""),
+        };
+        try {
+          const response = await fetch("/api/ui-roots/webdav", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          const payload = await response.json();
+          if (!response.ok) {
+            throw new Error(detailFromResponse(payload));
+          }
+          showUiMsg("追加しました。再読み込みします…", false);
+          window.location.reload();
+        } catch (error) {
+          showUiMsg(error.message, true);
+        }
+      });
+
+      document.querySelector("#roots-list")?.addEventListener("click", async (event) => {
+        const button = event.target.closest(".remove-root");
+        if (!button) {
+          return;
+        }
+        event.preventDefault();
+        const nm = button.dataset.name;
+        if (!nm || !window.confirm(`「${nm}」を削除しますか？`)) {
+          return;
+        }
+        try {
+          const response = await fetch(`/api/ui-roots/${encodeURIComponent(nm)}`, { method: "DELETE" });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(detailFromResponse(payload));
+          }
+          window.location.reload();
+        } catch (error) {
+          showUiMsg(error.message, true);
+        }
+      });
     </script>
   </body>
 </html>

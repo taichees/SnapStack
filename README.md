@@ -26,27 +26,12 @@ For implementation notes and design decisions, see
 
 ## Quick start
 
-1. Edit `docker-compose.yml` and map your NAS folders into the container:
+1. Put photos on the host under **`$HOME/snapstack`** (Compose default mount). The
+   container sees them as **`/photos/snapstack`**. To use a different host path,
+   set `SNAPSTACK_PHOTOS_HOST` when running Compose (see `docker-compose.yml`).
 
-   ```yaml
-   volumes:
-     - /mnt/nas/photos/camera-roll:/photos/camera-roll:ro
-     - /mnt/nas/photos/family:/photos/family:ro
-     - /mnt/nas/photos/archive:/photos/archive:ro
-   ```
-
-2. Edit `config/snapstack.yml` so each configured path points at the container
-   path from the right-hand side of the volume mapping:
-
-   ```yaml
-   photo_roots:
-     - name: camera-roll
-       path: /photos/camera-roll
-     - name: family
-       path: /photos/family
-     - name: archive
-       path: /photos/archive
-   ```
+2. `config/snapstack.yml` maps `photo_roots` to that container path (default:
+   `snapstack` → `/photos/snapstack`). You normally do not need to change it.
 
 3. Start the app:
 
@@ -63,21 +48,23 @@ For implementation notes and design decisions, see
 
 ```yaml
 photo_roots:
-  - name: camera-roll
-    path: /photos/camera-roll
-  - name: family
-    path: /photos/family
+  - name: snapstack
+    path: /photos/snapstack
 
 recommendation_count: 3
 hash_distance_threshold: 8
 burst_time_window_seconds: 20
 ```
 
-You can also skip the YAML file and pass comma-separated roots with
-`SNAPSTACK_PHOTO_ROOTS`:
+Docker maps the host directory to `/photos/snapstack` (default host path
+`$HOME/snapstack`, overridable with `SNAPSTACK_PHOTOS_HOST`).
+
+For **local** `uvicorn`, YAML still points at `/photos/snapstack`, which does
+not exist on the host—override roots with **`SNAPSTACK_PHOTO_ROOTS`** using the
+same host folder:
 
 ```bash
-SNAPSTACK_PHOTO_ROOTS=/photos/camera-roll,/photos/family uvicorn app.main:app
+SNAPSTACK_PHOTO_ROOTS="$HOME/snapstack" uvicorn app.main:app
 ```
 
 ## Scan and cache behavior
@@ -91,11 +78,24 @@ SNAPSTACK_PHOTO_ROOTS=/photos/camera-roll,/photos/family uvicorn app.main:app
 
 ## Development
 
+Python **3.10+** is recommended (the Docker image uses 3.12). After pulling changes, run `pip install -r requirements.txt` again so new dependencies such as `requests` are installed.
+
 ```bash
 python3 -m venv .venv
-. .venv/bin/activate
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-SNAPSTACK_CONFIG=config/snapstack.yml SNAPSTACK_DATA_DIR=.data uvicorn app.main:app --reload
+
+export SNAPSTACK_CONFIG=config/snapstack.yml
+export SNAPSTACK_DATA_DIR=.data
+export SNAPSTACK_PHOTO_ROOTS="$HOME/snapstack"
+export SNAPSTACK_UI_LOCAL_PREFIXES="$HOME/snapstack"
+
+# Optional — use a different sandbox folder instead:
+#   mkdir -p .data/dev-photo-roots
+#   export SNAPSTACK_PHOTO_ROOTS="$(pwd)/.data/dev-photo-roots"
+#   export SNAPSTACK_UI_LOCAL_PREFIXES="$(pwd)/.data/dev-photo-roots"
+
+uvicorn app.main:app --reload
 ```
 
 ## Cursor Cloud Agent environment

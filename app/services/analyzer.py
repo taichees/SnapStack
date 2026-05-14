@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from datetime import datetime
+from io import BytesIO
 from pathlib import Path
 
 import imagehash
@@ -35,10 +36,63 @@ def analyze_photo(path: Path, root_name: str, thumbnail_dir: Path) -> PhotoAnaly
     except (OSError, UnidentifiedImageError) as exc:
         raise ValueError(f"Cannot read image {path}: {exc}") from exc
 
+    return _finalize_analysis(
+        image=image,
+        captured_at=captured_at,
+        logical_path=path,
+        root_name=root_name,
+        thumbnail_dir=thumbnail_dir,
+        mtime=stat.st_mtime,
+        size_bytes=stat.st_size,
+    )
+
+
+def analyze_photo_bytes(
+    data: bytes,
+    logical_path: Path,
+    root_name: str,
+    thumbnail_dir: Path,
+    *,
+    mtime: float,
+    size_bytes: int,
+) -> PhotoAnalysis:
+    """メモリ上の画像バイト列を解析します（WebDAV 等向け）。
+    Analyzes in-memory image bytes (e.g. for WebDAV-backed files).
+    """
+
+    try:
+        with Image.open(BytesIO(data)) as raw_image:
+            image = ImageOps.exif_transpose(raw_image)
+            image.load()
+            captured_at = _extract_capture_time(raw_image)
+    except (OSError, UnidentifiedImageError) as exc:
+        raise ValueError(f"Cannot read image {logical_path}: {exc}") from exc
+
+    return _finalize_analysis(
+        image=image,
+        captured_at=captured_at,
+        logical_path=logical_path,
+        root_name=root_name,
+        thumbnail_dir=thumbnail_dir,
+        mtime=mtime,
+        size_bytes=size_bytes,
+    )
+
+
+def _finalize_analysis(
+    *,
+    image: Image.Image,
+    captured_at: datetime | None,
+    logical_path: Path,
+    root_name: str,
+    thumbnail_dir: Path,
+    mtime: float,
+    size_bytes: int,
+) -> PhotoAnalysis:
     rgb_image = image.convert("RGB")
     width, height = rgb_image.size
     phash = str(imagehash.phash(rgb_image))
-    thumbnail_id = _thumbnail_id(path, stat.st_mtime, stat.st_size)
+    thumbnail_id = _thumbnail_id(logical_path, mtime, size_bytes)
     _write_thumbnail(rgb_image, thumbnail_dir / f"{thumbnail_id}.jpg")
 
     sharpness_score, exposure_score, contrast_score = _quality_scores(rgb_image)
@@ -52,10 +106,10 @@ def analyze_photo(path: Path, root_name: str, thumbnail_dir: Path) -> PhotoAnaly
     )
 
     return PhotoAnalysis(
-        path=path,
+        path=logical_path,
         root_name=root_name,
-        mtime=stat.st_mtime,
-        size_bytes=stat.st_size,
+        mtime=mtime,
+        size_bytes=size_bytes,
         width=width,
         height=height,
         captured_at=captured_at,

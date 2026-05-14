@@ -58,7 +58,7 @@ SnapStack
 
 複数のNASフォルダを指定できる。
 
-Docker Composeではホスト側のNASパスをコンテナ内の `/photos/...` に読み取り専用でマウントする。
+Docker Composeではホスト側の写真フォルダをコンテナ内の `/photos/snapstack` などに読み取り専用でマウントする（既定はホストの `$HOME/snapstack`、`SNAPSTACK_PHOTOS_HOST` で変更可）。
 
 例:
 
@@ -66,21 +66,15 @@ Docker Composeではホスト側のNASパスをコンテナ内の `/photos/...` 
 services:
   snapstack:
     volumes:
-      - /mnt/nas/photos/camera-roll:/photos/camera-roll:ro
-      - /mnt/nas/photos/family:/photos/family:ro
-      - /mnt/nas/photos/archive:/photos/archive:ro
+      - ${SNAPSTACK_PHOTOS_HOST:-${HOME}/snapstack}:/photos/snapstack:ro
 ```
 
 アプリ設定では、コンテナ内パスを `config/snapstack.yml` に指定する。
 
 ```yaml
 photo_roots:
-  - name: camera-roll
-    path: /photos/camera-roll
-  - name: family
-    path: /photos/family
-  - name: archive
-    path: /photos/archive
+  - name: snapstack
+    path: /photos/snapstack
 ```
 
 UIでは、設定済みルートをチェックボックスで複数選択してスキャンできる。

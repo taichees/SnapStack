@@ -38,7 +38,9 @@ def test_groups_burst_photos_and_recommends_top_three(tmp_path: Path) -> None:
 
 def _settings(tmp_path: Path, roots: list[str]) -> Settings:
     return Settings(
-        photo_roots=[PhotoRoot(name=root, path=tmp_path / root) for root in roots],
+        roots=[PhotoRoot(name=root, path=tmp_path / root) for root in roots],
+        managed_root_names=frozenset(),
+        ui_local_prefixes=(tmp_path,),
         data_dir=tmp_path / "data",
         image_extensions={".jpg"},
         hash_distance_threshold=8,
