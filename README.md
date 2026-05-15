@@ -78,7 +78,7 @@ SNAPSTACK_PHOTO_ROOTS="$HOME/snapstack" uvicorn app.main:app
 
 ## Development
 
-Python **3.10+** is recommended (the Docker image uses 3.12). After pulling changes, run `pip install -r requirements.txt` again so new dependencies such as `requests` are installed.
+Python **3.10+** is recommended (the Docker image uses 3.12). After pulling changes, run `pip install -r requirements.txt` again when dependencies change.
 
 ```bash
 python3 -m venv .venv

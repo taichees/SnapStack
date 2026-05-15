@@ -7,12 +7,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-import requests
-
-from app.config import PhotoRoot, ScanRoot, Settings, WebDavPhotoRoot, webdav_logical_path
+from app.config import PhotoRoot, Settings
 from app.models import PhotoAnalysis
-from app.services.analyzer import analyze_photo, analyze_photo_bytes, hamming_distance
-from app.services.webdav_client import fetch_webdav_file, iter_webdav_image_relpaths
+from app.services.analyzer import analyze_photo, hamming_distance
 from app.storage import AnalysisStore
 
 
@@ -32,19 +29,6 @@ class ScanSummary:
     last_scan_at: str
     roots: list[str]
     errors: list[str]
-
-
-@dataclass(frozen=True)
-class ScanFile:
-    """1枚分のスキャン対象（ローカルまたは WebDAV）です。"""
-
-    root_name: str
-    logical_path: Path
-    local_path: Path | None
-    dav: WebDavPhotoRoot | None
-    dav_rel: str | None
-    mtime: float
-    size_bytes: int
 
 
 class PhotoScanner:
@@ -101,69 +85,20 @@ class PhotoScanner:
                 last_file=None,
             )
 
-            dav_sessions: dict[str, requests.Session] = {}
+            tasks: list[tuple[PhotoRoot, Path]] = []
             for root in selected_roots:
-                if isinstance(root, WebDavPhotoRoot):
-                    session = requests.Session()
-                    if root.username or root.password:
-                        session.auth = (root.username, root.password)
-                    dav_sessions[root.name] = session
-
-            tasks: list[ScanFile] = []
-            for root in selected_roots:
-                if isinstance(root, PhotoRoot):
-                    if not root.path.exists():
-                        raise ValueError(f"Photo root does not exist: {root.path}")
-                    for path in self._iter_images(root):
-                        stat = path.stat()
-                        tasks.append(
-                            ScanFile(
-                                root_name=root.name,
-                                logical_path=path,
-                                local_path=path,
-                                dav=None,
-                                dav_rel=None,
-                                mtime=stat.st_mtime,
-                                size_bytes=stat.st_size,
-                            )
+                if not root.path.exists():
+                    raise ValueError(f"Photo root does not exist: {root.path}")
+                for path in self._iter_images(root):
+                    tasks.append((root, path))
+                    if len(tasks) % 400 == 0:
+                        self._progress_update(
+                            phase="enumerating",
+                            current=len(tasks),
+                            total=0,
+                            roots=root_labels,
+                            last_file=path.name,
                         )
-                        if len(tasks) % 400 == 0:
-                            self._progress_update(
-                                phase="enumerating",
-                                current=len(tasks),
-                                total=0,
-                                roots=root_labels,
-                                last_file=path.name,
-                            )
-                else:
-                    session = dav_sessions[root.name]
-                    for rel, mt, sz in iter_webdav_image_relpaths(
-                        session,
-                        root.base_url,
-                        root.remote_path,
-                        self.settings.image_extensions,
-                    ):
-                        logical = webdav_logical_path(root.dav_id, rel)
-                        tasks.append(
-                            ScanFile(
-                                root_name=root.name,
-                                logical_path=logical,
-                                local_path=None,
-                                dav=root,
-                                dav_rel=rel,
-                                mtime=float(mt or 0.0),
-                                size_bytes=int(sz or 0),
-                            )
-                        )
-                        if len(tasks) % 400 == 0:
-                            label = rel.split("/")[-1] or rel
-                            self._progress_update(
-                                phase="enumerating",
-                                current=len(tasks),
-                                total=0,
-                                roots=root_labels,
-                                last_file=label,
-                            )
 
             total_files = len(tasks)
             self._progress_update(
@@ -183,64 +118,33 @@ class PhotoScanner:
             cached_files = 0
             emit_every = max(1, total_files // 120) if total_files else 1
 
-            for index, sf in enumerate(tasks):
+            for index, (root, path) in enumerate(tasks):
                 scanned_files += 1
-                seen_paths.add(sf.logical_path)
+                seen_paths.add(path)
                 step = index + 1
-                label = sf.logical_path.name
                 if step == 1 or step == total_files or step % emit_every == 0:
                     self._progress_update(
                         phase="analyzing",
                         current=step,
                         total=total_files,
                         roots=root_labels,
-                        last_file=label,
+                        last_file=path.name,
                     )
                 try:
-                    if sf.local_path is not None:
-                        stat = sf.local_path.stat()
-                        cached = self.store.get_valid(sf.logical_path, stat.st_mtime, stat.st_size)
-                        thumbnail_exists = cached and (self.thumbnail_dir / f"{cached.thumbnail_id}.jpg").exists()
-                        if cached and thumbnail_exists:
-                            photos.append(cached)
-                            cached_files += 1
-                            continue
+                    stat = path.stat()
+                    cached = self.store.get_valid(path, stat.st_mtime, stat.st_size)
+                    thumbnail_exists = cached and (self.thumbnail_dir / f"{cached.thumbnail_id}.jpg").exists()
+                    if cached and thumbnail_exists:
+                        photos.append(cached)
+                        cached_files += 1
+                        continue
 
-                        analysis = analyze_photo(sf.local_path, sf.root_name, self.thumbnail_dir)
-                        self.store.upsert(analysis)
-                        photos.append(analysis)
-                        analyzed_files += 1
-                    else:
-                        assert sf.dav is not None and sf.dav_rel is not None
-                        session = dav_sessions[sf.root_name]
-                        cached = self.store.get_valid(sf.logical_path, sf.mtime, sf.size_bytes)
-                        thumbnail_exists = cached and (self.thumbnail_dir / f"{cached.thumbnail_id}.jpg").exists()
-                        if cached and thumbnail_exists:
-                            photos.append(cached)
-                            cached_files += 1
-                            continue
-
-                        data, hdr_mtime, data_len = fetch_webdav_file(
-                            session,
-                            sf.dav.base_url,
-                            sf.dav.remote_path,
-                            sf.dav_rel,
-                        )
-                        mtime = float(hdr_mtime if hdr_mtime is not None else sf.mtime)
-                        size_bytes = int(data_len)
-                        analysis = analyze_photo_bytes(
-                            data,
-                            sf.logical_path,
-                            sf.root_name,
-                            self.thumbnail_dir,
-                            mtime=mtime,
-                            size_bytes=size_bytes,
-                        )
-                        self.store.upsert(analysis)
-                        photos.append(analysis)
-                        analyzed_files += 1
+                    analysis = analyze_photo(path, root.name, self.thumbnail_dir)
+                    self.store.upsert(analysis)
+                    photos.append(analysis)
+                    analyzed_files += 1
                 except Exception as exc:
-                    errors.append(f"{sf.logical_path}: {exc}")
+                    errors.append(f"{path}: {exc}")
 
             deleted_cached_files = self.store.delete_missing_for_roots(
                 [root.name for root in selected_roots],
@@ -292,7 +196,7 @@ class PhotoScanner:
 
         return self.store.get_last_scan_finished_at()
 
-    def _select_roots(self, root_names: Iterable[str] | None) -> list[ScanRoot]:
+    def _select_roots(self, root_names: Iterable[str] | None) -> list[PhotoRoot]:
         """リクエストされたルート名を設定済みルートに解決します。
         Resolves requested root names to configured scan roots.
         """

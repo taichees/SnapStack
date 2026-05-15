@@ -17,21 +17,24 @@ def runtime_path(data_dir: Path) -> Path:
 def read_runtime(data_dir: Path) -> dict[str, Any]:
     path = runtime_path(data_dir)
     if not path.exists():
-        return {"version": RUNTIME_VERSION, "local": [], "webdav": []}
+        return {"version": RUNTIME_VERSION, "local": []}
     with path.open("r", encoding="utf-8") as file:
         data = json.load(file)
     if not isinstance(data, dict):
-        return {"version": RUNTIME_VERSION, "local": [], "webdav": []}
+        return {"version": RUNTIME_VERSION, "local": []}
     data.setdefault("version", RUNTIME_VERSION)
     data.setdefault("local", [])
-    data.setdefault("webdav", [])
+    # Legacy WebDAV entries are no longer loaded; strip key so saves drop them.
+    data.pop("webdav", None)
     return data
 
 
 def write_runtime(data_dir: Path, data: dict[str, Any]) -> None:
     path = runtime_path(data_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(data, ensure_ascii=False, indent=2)
+    clean = dict(data)
+    clean.pop("webdav", None)
+    payload = json.dumps(clean, ensure_ascii=False, indent=2)
     directory = path.parent
     with tempfile.NamedTemporaryFile(
         mode="w",

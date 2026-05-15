@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import os
 import re
-import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Union
+from typing import Any
 
 import yaml
 
@@ -32,29 +31,12 @@ class PhotoRoot:
 
 
 @dataclass(frozen=True)
-class WebDavPhotoRoot:
-    """画面から追加した WebDAV ルートです。
-    WebDAV-backed root added from the UI.
-    """
-
-    name: str
-    dav_id: str
-    base_url: str
-    username: str
-    password: str
-    remote_path: str
-
-
-ScanRoot = Union[PhotoRoot, WebDavPhotoRoot]
-
-
-@dataclass(frozen=True)
 class Settings:
     """アプリ全体で使う設定値をまとめます。
     Holds application-wide settings loaded from YAML or environment variables.
     """
 
-    roots: list[ScanRoot]
+    roots: list[PhotoRoot]
     managed_root_names: frozenset[str]
     ui_local_prefixes: tuple[Path, ...]
     data_dir: Path
@@ -137,28 +119,12 @@ def validate_ui_local_path(path: Path, prefixes: tuple[Path, ...]) -> Path:
     raise ValueError(f"パスは次のいずれかの配下である必要があります: {allowed}")
 
 
-def validate_webdav_base_url(base_url: str) -> str:
-    url = base_url.strip()
-    if not url.startswith(("https://", "http://")):
-        raise ValueError("base_url は http:// または https:// で始まる必要があります")
-    return url.rstrip("/") + "/"
-
-
-def webdav_logical_path(dav_id: str, rel: str) -> Path:
-    """WebDAV 上の1ファイルを表す論理パス（DB キー用）を作ります。
-    Builds a stable logical Path key for one WebDAV file.
-    """
-
-    clean = rel.strip("/").replace("//", "/")
-    return Path(f"/__webdav__/{dav_id}/{clean}")
-
-
 def _runtime_photo_roots(
     *,
     data_dir: Path,
     ui_prefixes: tuple[Path, ...],
     yaml_roots: list[PhotoRoot],
-) -> tuple[list[PhotoRoot], list[WebDavPhotoRoot], frozenset[str]]:
+) -> tuple[list[PhotoRoot], frozenset[str]]:
     """runtime_roots.json から UI 管理ルートを読み込みます。
     Loads UI-managed roots from runtime_roots.json.
     """
@@ -181,32 +147,7 @@ def _runtime_photo_roots(
         extra_locals.append(PhotoRoot(name=name, path=path))
         managed.add(name)
 
-    dav_roots: list[WebDavPhotoRoot] = []
-    for item in runtime.get("webdav", []):
-        if not isinstance(item, dict):
-            continue
-        name = sanitize_root_name(str(item.get("name", "")))
-        dav_id = str(item.get("id", "")).strip() or uuid.uuid4().hex[:12]
-        base_url = str(item.get("base_url", "")).strip()
-        if not name or not base_url or name in yaml_names or name in managed:
-            continue
-        try:
-            normalized = validate_webdav_base_url(base_url)
-        except ValueError:
-            continue
-        dav_roots.append(
-            WebDavPhotoRoot(
-                name=name,
-                dav_id=dav_id,
-                base_url=normalized,
-                username=str(item.get("username", "") or ""),
-                password=str(item.get("password", "") or ""),
-                remote_path=str(item.get("remote_path", "") or "").strip("/"),
-            )
-        )
-        managed.add(name)
-
-    return extra_locals, dav_roots, frozenset(managed)
+    return extra_locals, frozenset(managed)
 
 
 def load_settings() -> Settings:
@@ -230,12 +171,12 @@ def load_settings() -> Settings:
         yaml_roots = _roots_from_config(config) or _roots_from_env()
     data_dir = Path(os.getenv("SNAPSTACK_DATA_DIR", str(config.get("data_dir", "/data"))))
     ui_prefixes = _ui_prefixes_from_env()
-    extra_locals, dav_roots, managed = _runtime_photo_roots(
+    extra_locals, managed = _runtime_photo_roots(
         data_dir=data_dir,
         ui_prefixes=ui_prefixes,
         yaml_roots=yaml_roots,
     )
-    roots: list[ScanRoot] = [*yaml_roots, *extra_locals, *dav_roots]
+    roots: list[PhotoRoot] = [*yaml_roots, *extra_locals]
 
     image_extensions = {
         str(ext).lower() if str(ext).startswith(".") else f".{str(ext).lower()}"

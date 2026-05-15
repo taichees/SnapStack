@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -9,14 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
-from app.config import (
-    PhotoRoot,
-    WebDavPhotoRoot,
-    load_settings,
-    sanitize_root_name,
-    validate_ui_local_path,
-    validate_webdav_base_url,
-)
+from app.config import load_settings, sanitize_root_name, validate_ui_local_path
 from app.runtime_store import read_runtime, write_runtime
 from app.services.scanner import PhotoScanner
 
@@ -37,51 +29,29 @@ def _reload_app() -> None:
 def _root_cards() -> list[dict[str, object]]:
     cards: list[dict[str, object]] = []
     for root in settings.roots:
-        if isinstance(root, PhotoRoot):
-            cards.append(
-                {
-                    "name": root.name,
-                    "subtitle": str(root.path),
-                    "kind": "local",
-                    "managed": root.name in settings.managed_root_names,
-                }
-            )
-        elif isinstance(root, WebDavPhotoRoot):
-            tail = root.remote_path or "/"
-            cards.append(
-                {
-                    "name": root.name,
-                    "subtitle": f"WebDAV {root.base_url}{tail}",
-                    "kind": "webdav",
-                    "managed": root.name in settings.managed_root_names,
-                }
-            )
+        cards.append(
+            {
+                "name": root.name,
+                "subtitle": str(root.path),
+                "kind": "local",
+                "managed": root.name in settings.managed_root_names,
+            }
+        )
     return cards
 
 
 def _serialize_roots_api() -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     for root in settings.roots:
-        if isinstance(root, PhotoRoot):
-            rows.append(
-                {
-                    "name": root.name,
-                    "path": str(root.path),
-                    "kind": "local",
-                    "exists": root.path.exists(),
-                    "managed": root.name in settings.managed_root_names,
-                }
-            )
-        elif isinstance(root, WebDavPhotoRoot):
-            rows.append(
-                {
-                    "name": root.name,
-                    "path": f"{root.base_url}{root.remote_path}",
-                    "kind": "webdav",
-                    "exists": True,
-                    "managed": root.name in settings.managed_root_names,
-                }
-            )
+        rows.append(
+            {
+                "name": root.name,
+                "path": str(root.path),
+                "kind": "local",
+                "exists": root.path.exists(),
+                "managed": root.name in settings.managed_root_names,
+            }
+        )
     return rows
 
 
@@ -96,14 +66,6 @@ class ScanRequest(BaseModel):
 class AddLocalRootBody(BaseModel):
     name: str = Field(..., min_length=1)
     path: str = Field(..., min_length=1)
-
-
-class AddWebDavRootBody(BaseModel):
-    name: str = Field(..., min_length=1)
-    base_url: str = Field(..., min_length=1)
-    username: str = ""
-    password: str = ""
-    remote_path: str = ""
 
 
 @app.get("/")
@@ -161,37 +123,6 @@ def add_ui_local_root(body: AddLocalRootBody):
     return {"ok": True, "name": name, "path": str(path)}
 
 
-@app.post("/api/ui-roots/webdav")
-def add_ui_webdav_root(body: AddWebDavRootBody):
-    """WebDAV 上のフォルダをルートとして追加します（認証情報は /data に保存されます）。"""
-    name = sanitize_root_name(body.name)
-    if not name:
-        raise HTTPException(status_code=400, detail="名前が不正です")
-    if any(root.name == name for root in settings.roots):
-        raise HTTPException(status_code=400, detail="同じ名前のルートが既に存在します")
-    base_url = validate_webdav_base_url(body.base_url)
-    dav_id = uuid.uuid4().hex[:12]
-    runtime = read_runtime(settings.data_dir)
-    runtime["webdav"] = [
-        item
-        for item in runtime.get("webdav", [])
-        if isinstance(item, dict) and sanitize_root_name(str(item.get("name", ""))) != name
-    ]
-    runtime["webdav"].append(
-        {
-            "id": dav_id,
-            "name": name,
-            "base_url": base_url,
-            "username": body.username,
-            "password": body.password,
-            "remote_path": body.remote_path.strip().strip("/"),
-        }
-    )
-    write_runtime(settings.data_dir, runtime)
-    _reload_app()
-    return {"ok": True, "name": name, "id": dav_id}
-
-
 @app.delete("/api/ui-roots/{name}")
 def delete_ui_root(name: str):
     """画面から追加したルートだけ削除できます。"""
@@ -202,11 +133,6 @@ def delete_ui_root(name: str):
     runtime["local"] = [
         item
         for item in runtime.get("local", [])
-        if not isinstance(item, dict) or sanitize_root_name(str(item.get("name", ""))) != key
-    ]
-    runtime["webdav"] = [
-        item
-        for item in runtime.get("webdav", [])
         if not isinstance(item, dict) or sanitize_root_name(str(item.get("name", ""))) != key
     ]
     write_runtime(settings.data_dir, runtime)

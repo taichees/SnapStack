@@ -169,12 +169,6 @@ button:disabled {
   border-style: dashed;
 }
 
-.panel-muted h3 {
-  margin-top: 20px;
-  margin-bottom: 8px;
-  font-size: 16px;
-}
-
 .hint {
   color: #5c574d;
   line-height: 1.7;

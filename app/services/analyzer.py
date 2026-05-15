@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 from datetime import datetime
-from io import BytesIO
 from pathlib import Path
 
 import imagehash
@@ -44,38 +43,6 @@ def analyze_photo(path: Path, root_name: str, thumbnail_dir: Path) -> PhotoAnaly
         thumbnail_dir=thumbnail_dir,
         mtime=stat.st_mtime,
         size_bytes=stat.st_size,
-    )
-
-
-def analyze_photo_bytes(
-    data: bytes,
-    logical_path: Path,
-    root_name: str,
-    thumbnail_dir: Path,
-    *,
-    mtime: float,
-    size_bytes: int,
-) -> PhotoAnalysis:
-    """メモリ上の画像バイト列を解析します（WebDAV 等向け）。
-    Analyzes in-memory image bytes (e.g. for WebDAV-backed files).
-    """
-
-    try:
-        with Image.open(BytesIO(data)) as raw_image:
-            image = ImageOps.exif_transpose(raw_image)
-            image.load()
-            captured_at = _extract_capture_time(raw_image)
-    except (OSError, UnidentifiedImageError) as exc:
-        raise ValueError(f"Cannot read image {logical_path}: {exc}") from exc
-
-    return _finalize_analysis(
-        image=image,
-        captured_at=captured_at,
-        logical_path=logical_path,
-        root_name=root_name,
-        thumbnail_dir=thumbnail_dir,
-        mtime=mtime,
-        size_bytes=size_bytes,
     )
 
 

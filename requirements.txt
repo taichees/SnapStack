@@ -1,6 +1,5 @@
 fastapi
 uvicorn[standard]
-requests
 jinja2
 pillow
 pillow-heif

@@ -52,32 +52,17 @@
       </section>
 
       <section class="panel panel-muted">
-        <h2>クラウド同期・WebDAV を追加</h2>
+        <h2>同期フォルダを追加</h2>
         <p class="hint">
-          Google Drive / iCloud Drive / Dropbox / Amazon Photos などは、Docker でホストの同期フォルダを
+          Google Drive / iCloud Drive / Dropbox などは、Docker でホストの同期フォルダを
           <code>/photos/cloud</code> や <code>/photos/icloud</code> にマウントしたうえで、その<strong>コンテナ内の絶対パス</strong>を指定してください。
           許可されたプレフィックス: <code id="allowed-prefixes">{{ ui_local_prefixes | join(", ") or "（未設定）" }}</code>
         </p>
 
-        <h3>同期フォルダ（ローカルマウント）</h3>
         <form id="form-add-local" class="form-row">
           <input name="name" type="text" placeholder="表示名（例: gdrive-camera）" required />
           <input name="path" type="text" placeholder="/photos/cloud/GoogleDrive-…/Album" required />
           <button type="submit">追加</button>
-        </form>
-
-        <h3>WebDAV</h3>
-        <form id="form-add-webdav" class="form-stack">
-          <div class="form-row">
-            <input name="name" type="text" placeholder="表示名" required />
-            <input name="base_url" type="url" placeholder="https://example.com/remote.php/webdav/" required />
-          </div>
-          <div class="form-row">
-            <input name="username" type="text" placeholder="ユーザー名（任意）" />
-            <input name="password" type="password" placeholder="パスワード（任意）" />
-            <input name="remote_path" type="text" placeholder="リモートフォルダ（例: Photos）" />
-          </div>
-          <button type="submit">WebDAV を追加</button>
         </form>
         <p id="ui-roots-message" class="form-message" role="status"></p>
       </section>
@@ -373,33 +358,6 @@
         const body = { name: String(data.get("name") || ""), path: String(data.get("path") || "") };
         try {
           const response = await fetch("/api/ui-roots/local", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-          });
-          const payload = await response.json();
-          if (!response.ok) {
-            throw new Error(detailFromResponse(payload));
-          }
-          showUiMsg("追加しました。再読み込みします…", false);
-          window.location.reload();
-        } catch (error) {
-          showUiMsg(error.message, true);
-        }
-      });
-
-      document.querySelector("#form-add-webdav")?.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        const data = new FormData(event.target);
-        const body = {
-          name: String(data.get("name") || ""),
-          base_url: String(data.get("base_url") || ""),
-          username: String(data.get("username") || ""),
-          password: String(data.get("password") || ""),
-          remote_path: String(data.get("remote_path") || ""),
-        };
-        try {
-          const response = await fetch("/api/ui-roots/webdav", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
