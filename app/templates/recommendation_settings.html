@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>おすすめ判定 — SnapStack</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="page">
+      <nav class="site-nav">
+        <a href="/">← スキャン画面に戻る</a>
+        ·
+        <a href="/settings/google-drive">Google Drive 連携</a>
+      </nav>
+
+      <header class="hero hero-compact">
+        <p class="eyebrow">Settings</p>
+        <h1>おすすめの判定</h1>
+        <p>
+          類似グループ内で「同一ファイル」とみなした写真について、保存場所の優先順位・パス・ファイル名の順で並べ、
+          後から出てきたものの総合スコアを 0 にできます。設定は <code>{{ data_dir }}/runtime_roots.json</code> に保存されます。
+        </p>
+      </header>
+
+      <section class="panel panel-muted">
+        <h2>同一ファイルの扱い</h2>
+        <p class="hint">
+          同一ファイルの判定: グループ内で pHash のハミング距離がしきい値以下の写真を同一とみなします（既定 0 = 完全一致）。
+          NAS = YAML / <code>SNAPSTACK_PHOTO_ROOTS</code> のローカルルート。
+          Cloud = Google Drive ルートと、UI から追加した同期フォルダ。
+        </p>
+
+        <form id="form-recommendation" class="oauth-client-form">
+          <label class="field-block field-check">
+            <input name="zero_score_for_duplicate_files" type="checkbox" {% if rec.zero_score_for_duplicate_files %}checked{% endif %} />
+            <span>同一ファイルのうち優先順で後ろの写真のスコアを 0 にする</span>
+          </label>
+
+          <label class="field-block">
+            <span class="field-label">保存場所の優先順（同一ファイル群の並び）</span>
+            <select name="storage_priority">
+              <option value="nas_first" {% if rec.storage_priority == "nas_first" %}selected{% endif %}>NAS を優先（NAS → Cloud → パス → ファイル名）</option>
+              <option value="cloud_first" {% if rec.storage_priority == "cloud_first" %}selected{% endif %}>Cloud を優先（Cloud → NAS → パス → ファイル名）</option>
+            </select>
+          </label>
+
+          <label class="field-block">
+            <span class="field-label">同一ファイルとみなす pHash 距離（0〜16）</span>
+            <input name="same_file_max_hash_distance" type="number" min="0" max="16" value="{{ rec.same_file_max_hash_distance }}" />
+            <span class="field-hint">0 推奨。大きくすると再エンコード済みの同一写真も同一扱いになります。</span>
+          </label>
+
+          <div class="form-actions-row">
+            <button type="submit">設定を保存</button>
+          </div>
+        </form>
+        <p id="recommendation-message" class="form-message" role="status"></p>
+      </section>
+    </main>
+
+    <script>
+      function detailFromResponse(payload) {
+        const detail = payload?.detail;
+        if (typeof detail === "string") return detail;
+        if (Array.isArray(detail)) {
+          return detail.map((item) => (typeof item === "object" && item?.msg ? item.msg : JSON.stringify(item))).join("; ");
+        }
+        return "リクエストに失敗しました";
+      }
+
+      const form = document.querySelector("#form-recommendation");
+      const msg = document.querySelector("#recommendation-message");
+
+      form?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const fd = new FormData(form);
+        const body = {
+          zero_score_for_duplicate_files: fd.get("zero_score_for_duplicate_files") === "on",
+          storage_priority: String(fd.get("storage_priority") || "nas_first"),
+          same_file_max_hash_distance: Number(fd.get("same_file_max_hash_distance") || 0),
+        };
+        try {
+          const response = await fetch("/api/settings/recommendation", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(detailFromResponse(payload));
+          msg.textContent = "保存しました。次回のスキャンから反映されます。";
+          msg.classList.remove("is-error");
+        } catch (error) {
+          msg.textContent = error.message;
+          msg.classList.add("is-error");
+        }
+      });
+    </script>
+  </body>
+</html>

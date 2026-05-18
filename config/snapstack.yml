@@ -5,6 +5,12 @@ photo_roots:
 data_dir: /data
 recommendation_count: 3
 
+# おすすめ判定（通常は /settings/recommendation から runtime_roots.json に保存）
+# recommendation:
+#   zero_score_for_duplicate_files: true
+#   storage_priority: nas_first   # nas_first | cloud_first
+#   same_file_max_hash_distance: 0
+
 # Smaller values create stricter groups. Increase slightly if burst photos with
 # motion are split across several groups.
 hash_distance_threshold: 8
@@ -17,3 +23,9 @@ image_extensions:
   - .webp
   - .heic
   - .heif
+
+# Google Drive（任意・レガシー）。通常は UI の /settings/google-drive から runtime_roots.json に保存。
+# google_drive:
+#   enabled: true
+#   name: google-drive
+#   folder_id: root

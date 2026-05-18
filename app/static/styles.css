@@ -40,6 +40,82 @@ body {
   line-height: 1.8;
 }
 
+.hero-compact {
+  padding: 28px 32px;
+}
+
+.hero-compact h1 {
+  font-size: clamp(28px, 5vw, 48px);
+}
+
+.hero-links {
+  margin-top: 16px;
+}
+
+.hero-links a {
+  color: #ffe8c8;
+}
+
+.site-nav {
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+
+.site-nav a {
+  color: #5c574d;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.site-nav a:hover {
+  text-decoration: underline;
+}
+
+.panel-compact {
+  padding: 20px 24px;
+}
+
+.numbered-steps {
+  margin: 12px 0 0;
+  padding-left: 1.25em;
+  line-height: 1.75;
+  font-size: 14px;
+  color: #3d3a34;
+}
+
+.numbered-steps li {
+  margin-bottom: 12px;
+}
+
+.numbered-steps code {
+  display: inline-block;
+  margin-top: 6px;
+  word-break: break-all;
+}
+
+.field-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+
+.field-check input {
+  width: auto;
+}
+
+.field-hint {
+  font-size: 13px;
+  color: #5c574d;
+  line-height: 1.6;
+}
+
+.button-link-secondary {
+  margin-top: 12px;
+  background: #fffdf7;
+  color: #3d3a34;
+  border: 1px solid #dcd6c9;
+}
+
 .eyebrow {
   text-transform: uppercase;
   letter-spacing: 0.24em;
@@ -130,6 +206,20 @@ button:disabled {
   opacity: 0.6;
 }
 
+.button-link {
+  display: inline-block;
+  border-radius: 999px;
+  background: #1a73e8;
+  color: white;
+  padding: 12px 20px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.button-link:hover {
+  filter: brightness(1.05);
+}
+
 .roots {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
@@ -173,6 +263,55 @@ button:disabled {
   color: #5c574d;
   line-height: 1.7;
   font-size: 14px;
+}
+
+.hint-list {
+  margin: 8px 0 12px 1.1em;
+  padding: 0;
+  color: #5c574d;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.hint-list li {
+  margin-bottom: 4px;
+}
+
+.oauth-client-form {
+  margin: 16px 0;
+  max-width: 640px;
+}
+
+.field-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.field-block .field-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #3d3a34;
+}
+
+.field-block input,
+.field-block select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid #dcd6c9;
+  font: inherit;
+  background: #fffdf7;
+}
+
+.form-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: 4px;
 }
 
 .form-row {

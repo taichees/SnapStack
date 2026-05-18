@@ -15,6 +15,11 @@
           連写や似た写真をまとめ、各グループから残す候補を最大{{ recommendation_count }}枚おすすめします。
           画像はローカルで解析し、初期版ではファイル削除は行いません。
         </p>
+        <p class="hero-links">
+          <a href="/settings/google-drive">Google Drive 連携</a>
+          ·
+          <a href="/settings/recommendation">おすすめの判定</a>
+        </p>
       </header>
 
       <section class="panel" id="roots-panel" data-ui-prefixes="{{ ui_local_prefixes | join(', ') }}">
@@ -49,6 +54,21 @@
             <code>SNAPSTACK_PHOTO_ROOTS</code>で NAS 等を設定するか、下のフォームからクラウド同期フォルダを追加してください。
           </p>
         {% endif %}
+      </section>
+
+      {% set gds = google_drive_summary %}
+      <section class="panel panel-muted panel-compact">
+        <h2>Google Drive</h2>
+        {% if gds.in_roots %}
+          <p class="form-message">スキャン対象に「{{ gds.name }}」が含まれています（接続: {% if gds.connected %}済{% else %}未{% endif %}）。</p>
+        {% elif gds.scan_enabled and gds.connected %}
+          <p class="form-message is-error">スキャンは有効ですが、ルート一覧に未反映です。設定画面で保存し直すかページを再読み込みしてください。</p>
+        {% elif gds.scan_enabled %}
+          <p class="hint">スキャン対象は有効です。Google への接続がまだです。</p>
+        {% else %}
+          <p class="hint">未設定です。連携画面で OAuth クライアントとスキャン対象を有効にしてください。</p>
+        {% endif %}
+        <a class="button-link button-link-secondary" href="/settings/google-drive">連携の設定を開く</a>
       </section>
 
       <section class="panel panel-muted">
@@ -297,7 +317,10 @@
         const pathEl = node.querySelector(".photo-path");
         pathEl.textContent = photo.path || "";
         pathEl.hidden = !photo.path;
-        node.querySelector(".photo-score").textContent = `総合スコア ${Math.round(photo.score * 100)} / 100`;
+        const scoreLabel = photo.duplicate_penalized
+          ? `総合スコア ${Math.round(photo.score * 100)} / 100（同一ファイルのため 0 点）`
+          : `総合スコア ${Math.round(photo.score * 100)} / 100`;
+        node.querySelector(".photo-score").textContent = scoreLabel;
         node.querySelector(".photo-meta").textContent =
           `${photo.width}x${photo.height} / ${photo.captured_at || "撮影日時なし"}`;
         if (recommended) {

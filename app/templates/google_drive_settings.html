@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Google Drive 連携 — SnapStack</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="page">
+      <nav class="site-nav">
+        <a href="/">← スキャン画面に戻る</a>
+        ·
+        <a href="/settings/recommendation">おすすめの判定</a>
+      </nav>
+
+      <header class="hero hero-compact">
+        <p class="eyebrow">Settings</p>
+        <h1>Google Drive 連携</h1>
+        <p>
+          Google Cloud で OAuth クライアントを作成し、ここで認証情報とスキャン対象フォルダを保存します。
+          設定は <code>{{ data_dir }}/runtime_roots.json</code> および OAuth 用 JSON に保存されます。
+        </p>
+      </header>
+
+      <section class="panel setup-steps">
+        <h2>1. Google Cloud で OAuth クライアントを作る</h2>
+        <p class="hint">
+          SnapStack は <strong>API キーではなく OAuth 2.0 クライアント ID / シークレット</strong> を使います（Drive のファイル一覧・読み取り用）。
+        </p>
+        <ol class="numbered-steps">
+          <li>
+            <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">Google Cloud Console</a>
+            でプロジェクトを作成または選択する。
+          </li>
+          <li>
+            <strong>API とサービス</strong> → <strong>ライブラリ</strong> →「Google Drive API」を検索して <strong>有効にする</strong>。
+          </li>
+          <li>
+            <strong>API とサービス</strong> → <strong>OAuth 同意画面</strong> を開き、ユーザータイプ（外部で可）とアプリ名・連絡先を入力して保存する。
+          </li>
+          <li>
+            同じ画面の <strong>テストユーザー</strong> に、ログインに使う Google アカウントを追加する（公開前は必須）。
+          </li>
+          <li>
+            <strong>API とサービス</strong> → <strong>認証情報</strong> → <strong>認証情報を作成</strong> → <strong>OAuth クライアント ID</strong>。
+          </li>
+          <li>
+            アプリケーションの種類: <strong>ウェブアプリケーション</strong>。<br />
+            <strong>承認済みのリダイレクト URI</strong> に次を追加（画面下部の「現在のコールバック URL」と一致させる）:
+            <code id="google-oauth-effective-redirect">{{ default_redirect_uri }}</code>
+          </li>
+          <li>作成後に表示される <strong>クライアント ID</strong> と <strong>クライアント シークレット</strong> を、下のフォームに貼り付けて保存する。</li>
+        </ol>
+      </section>
+
+      <section class="panel panel-muted">
+        <h2>2. OAuth クライアント（SnapStack に保存）</h2>
+        <p class="hint">
+          保存先: <code>{{ data_dir }}/google_oauth_client.json</code>。
+          環境変数 <code>SNAPSTACK_GOOGLE_*</code> がある場合はそちらが優先されます。
+        </p>
+        <p class="hint" id="google-oauth-env-override" hidden></p>
+
+        <form id="form-google-oauth-client" class="oauth-client-form">
+          <label class="field-block">
+            <span class="field-label">クライアント ID</span>
+            <input name="client_id" type="text" autocomplete="off" required />
+          </label>
+          <label class="field-block">
+            <span class="field-label">クライアント秘密</span>
+            <input name="client_secret" type="password" autocomplete="off" placeholder="初回は必須。変更しない場合は空欄" />
+          </label>
+          <label class="field-block">
+            <span class="field-label">リダイレクト URI（任意）</span>
+            <input name="redirect_uri" type="text" autocomplete="off" placeholder="{{ default_redirect_uri }}（空欄で既定）" />
+          </label>
+          <div class="form-actions-row">
+            <button type="submit">クライアント設定を保存</button>
+            <button type="button" class="btn-ghost" id="google-oauth-clear-file" hidden>保存ファイルを削除</button>
+          </div>
+        </form>
+        <p id="google-oauth-client-message" class="form-message" role="status"></p>
+      </section>
+
+      <section class="panel panel-muted">
+        <h2>3. スキャン対象フォルダ（Drive）</h2>
+        <p class="hint">
+          有効にすると、トップ画面の「対象フォルダ」に Google Drive が表示されます（Google への接続も必要です）。
+        </p>
+
+        <form id="form-google-drive-scan" class="oauth-client-form">
+          <label class="field-block field-check">
+            <input name="enabled" type="checkbox" {% if google_drive.enabled %}checked{% endif %} />
+            <span>Google Drive をスキャン対象に含める</span>
+          </label>
+          <label class="field-block">
+            <span class="field-label">表示名（対象フォルダ一覧）</span>
+            <input name="name" type="text" value="{{ google_drive.name }}" required />
+          </label>
+          <label class="field-block">
+            <span class="field-label">フォルダ ID</span>
+            <input name="folder_id" type="text" value="{{ google_drive.folder_id }}" placeholder="root" required />
+            <span class="field-hint">
+              <code>root</code> はマイドライブ全体。特定フォルダは Drive で開いた URL の
+              <code>folders/xxxxxxxx</code> の部分。
+            </span>
+          </label>
+          <div class="form-actions-row">
+            <button type="submit">スキャン設定を保存</button>
+          </div>
+        </form>
+        <p id="google-drive-scan-message" class="form-message" role="status"></p>
+      </section>
+
+      <section class="panel">
+        <h2>4. Google アカウントと接続</h2>
+        {% if not oauth_ready %}
+          <p class="form-message is-error">先に OAuth クライアント ID / 秘密を保存してください。</p>
+        {% elif not google_drive.enabled %}
+          <p class="form-message is-error">先に「Google Drive をスキャン対象に含める」を有効にして保存してください。</p>
+        {% elif connected %}
+          <p class="form-message">Google に接続済みです。トップ画面で「{{ google_drive.name }}」にチェックを入れてスキャンできます。</p>
+          <div class="form-actions-row">
+            <a class="button-link" href="/">スキャン画面へ</a>
+            <button type="button" class="btn-ghost" id="google-disconnect">接続を解除</button>
+          </div>
+        {% else %}
+          <p class="hint">ブラウザで Google の同意画面が開きます。</p>
+          <a class="button-link" href="/oauth/google/start">Google Drive と接続</a>
+        {% endif %}
+      </section>
+    </main>
+
+    <script>
+      const defaultRedirectUri = {{ default_redirect_uri | tojson }};
+
+      function detailFromResponse(payload) {
+        const detail = payload?.detail;
+        if (typeof detail === "string") {
+          return detail;
+        }
+        if (Array.isArray(detail)) {
+          return detail.map((item) => (typeof item === "object" && item?.msg ? item.msg : JSON.stringify(item))).join("; ");
+        }
+        return "リクエストに失敗しました";
+      }
+
+      const googleOAuthForm = document.querySelector("#form-google-oauth-client");
+      const googleOAuthMsg = document.querySelector("#google-oauth-client-message");
+      const googleEffectiveRedir = document.querySelector("#google-oauth-effective-redirect");
+      const googleEnvOverride = document.querySelector("#google-oauth-env-override");
+      const googleClearBtn = document.querySelector("#google-oauth-clear-file");
+      const scanForm = document.querySelector("#form-google-drive-scan");
+      const scanMsg = document.querySelector("#google-drive-scan-message");
+
+      function showOAuthMsg(text, isError) {
+        if (!googleOAuthMsg) return;
+        googleOAuthMsg.textContent = text;
+        googleOAuthMsg.classList.toggle("is-error", Boolean(isError));
+      }
+
+      function showScanMsg(text, isError) {
+        if (!scanMsg) return;
+        scanMsg.textContent = text;
+        scanMsg.classList.toggle("is-error", Boolean(isError));
+      }
+
+      if (new URLSearchParams(window.location.search).get("google") === "connected") {
+        showOAuthMsg("Google に接続しました。", false);
+        window.history.replaceState({}, "", window.location.pathname);
+      }
+
+      async function loadGoogleOAuthClient() {
+        if (!googleOAuthForm) return;
+        try {
+          const response = await fetch("/api/google-oauth/client");
+          const data = await response.json();
+          if (!response.ok) throw new Error(detailFromResponse(data));
+          googleOAuthForm.querySelector('[name="client_id"]').value = data.client_id || "";
+          googleOAuthForm.querySelector('[name="client_secret"]').value = "";
+          googleOAuthForm.querySelector('[name="redirect_uri"]').value = data.redirect_uri || "";
+          if (googleEffectiveRedir) {
+            googleEffectiveRedir.textContent = data.effective_redirect_uri || defaultRedirectUri;
+          }
+          if (googleClearBtn) googleClearBtn.hidden = !data.has_saved_client_file;
+          const o = data.env_overrides || {};
+          const parts = [];
+          if (o.client_id) parts.push("クライアント ID");
+          if (o.client_secret) parts.push("クライアント秘密");
+          if (o.redirect_uri) parts.push("リダイレクト URI");
+          if (parts.length && googleEnvOverride) {
+            googleEnvOverride.textContent = `環境変数で次が上書きされています: ${parts.join("、")}`;
+            googleEnvOverride.hidden = false;
+          }
+        } catch (error) {
+          showOAuthMsg(error.message, true);
+        }
+      }
+
+      googleOAuthForm?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const fd = new FormData(googleOAuthForm);
+        try {
+          const response = await fetch("/api/google-oauth/client", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              client_id: String(fd.get("client_id") || ""),
+              client_secret: String(fd.get("client_secret") || ""),
+              redirect_uri: String(fd.get("redirect_uri") || ""),
+            }),
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(detailFromResponse(payload));
+          showOAuthMsg("保存しました。再読み込みします…", false);
+          window.location.reload();
+        } catch (error) {
+          showOAuthMsg(error.message, true);
+        }
+      });
+
+      googleClearBtn?.addEventListener("click", async () => {
+        if (!window.confirm("保存した google_oauth_client.json を削除しますか？")) return;
+        try {
+          const response = await fetch("/api/google-oauth/client", { method: "DELETE" });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(detailFromResponse(payload));
+          window.location.reload();
+        } catch (error) {
+          showOAuthMsg(error.message, true);
+        }
+      });
+
+      scanForm?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const fd = new FormData(scanForm);
+        try {
+          const response = await fetch("/api/google-drive/scan", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              enabled: fd.get("enabled") === "on",
+              name: String(fd.get("name") || ""),
+              folder_id: String(fd.get("folder_id") || "root"),
+            }),
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(detailFromResponse(payload));
+          showScanMsg("保存しました。再読み込みします…", false);
+          window.location.reload();
+        } catch (error) {
+          showScanMsg(error.message, true);
+        }
+      });
+
+      document.querySelector("#google-disconnect")?.addEventListener("click", async () => {
+        if (!window.confirm("Google の接続を解除しますか？")) return;
+        try {
+          const response = await fetch("/oauth/google/disconnect", { method: "POST" });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(detailFromResponse(payload));
+          window.location.reload();
+        } catch (error) {
+          showOAuthMsg(error.message, true);
+        }
+      });
+
+      loadGoogleOAuthClient();
+    </script>
+  </body>
+</html>

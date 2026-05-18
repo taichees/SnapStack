@@ -9,7 +9,8 @@ writes thumbnails and analysis cache to Docker storage, and does not delete
 original files.
 
 For implementation notes and design decisions, see
-[`docs/project-summary.md`](docs/project-summary.md).
+[`docs/project-summary.md`](docs/project-summary.md) and the [docs index](docs/README.md)
+(Google Drive OAuth, recommendation policy).
 
 ## Features
 
@@ -97,6 +98,13 @@ export SNAPSTACK_UI_LOCAL_PREFIXES="$HOME/snapstack"
 
 uvicorn app.main:app --reload
 ```
+
+### Google Drive (OAuth) on localhost
+
+Open **http://127.0.0.1:8000/settings/google-drive** for setup steps, OAuth client
+credentials, scan folder ID, and account connection. Settings are stored under
+`SNAPSTACK_DATA_DIR` (`runtime_roots.json` and OAuth token files). Use redirect URI
+`http://127.0.0.1:8000/oauth/google/callback` in Google Cloud Console (shown on that page).
 
 ## Cursor Cloud Agent environment
 
