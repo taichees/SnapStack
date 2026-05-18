@@ -7,10 +7,24 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from app.config import PhotoRoot, Settings
+from app.config import GoogleDrivePhotoRoot, PhotoRoot, ScanRoot, Settings, google_drive_logical_path
 from app.models import PhotoAnalysis
-from app.services.analyzer import analyze_photo, hamming_distance
+from app.services.analyzer import analyze_photo, analyze_photo_bytes, hamming_distance
+from app.services.recommendation_policy import AdjustedPhoto, apply_duplicate_score_policy
+from app.services.google_drive_files import download_drive_file, iter_drive_image_files
+from app.services.google_oauth import credentials_fresh
 from app.storage import AnalysisStore
+
+
+@dataclass(frozen=True)
+class _ScanWork:
+    root_name: str
+    local_path: Path | None
+    drive_file_id: str | None
+    logical_path: Path
+    mtime: float
+    size_bytes: int
+    label: str
 
 
 @dataclass(frozen=True)
@@ -85,20 +99,69 @@ class PhotoScanner:
                 last_file=None,
             )
 
-            tasks: list[tuple[PhotoRoot, Path]] = []
+            drive_creds = None
+            if any(isinstance(r, GoogleDrivePhotoRoot) for r in selected_roots):
+                drive_creds = credentials_fresh(self.settings.data_dir)
+                if drive_creds is None:
+                    raise ValueError(
+                        "Google Drive ルートが選択されていますが OAuth トークンがありません。"
+                        "ブラウザで「Google Drive と接続」から認証してください。",
+                    )
+
+            tasks: list[_ScanWork] = []
             for root in selected_roots:
-                if not root.path.exists():
-                    raise ValueError(f"Photo root does not exist: {root.path}")
-                for path in self._iter_images(root):
-                    tasks.append((root, path))
-                    if len(tasks) % 400 == 0:
-                        self._progress_update(
-                            phase="enumerating",
-                            current=len(tasks),
-                            total=0,
-                            roots=root_labels,
-                            last_file=path.name,
+                if isinstance(root, PhotoRoot):
+                    if not root.path.exists():
+                        raise ValueError(f"Photo root does not exist: {root.path}")
+                    for path in self._iter_images(root):
+                        stat = path.stat()
+                        tasks.append(
+                            _ScanWork(
+                                root_name=root.name,
+                                local_path=path,
+                                drive_file_id=None,
+                                logical_path=path,
+                                mtime=stat.st_mtime,
+                                size_bytes=stat.st_size,
+                                label=path.name,
+                            )
                         )
+                        if len(tasks) % 400 == 0:
+                            self._progress_update(
+                                phase="enumerating",
+                                current=len(tasks),
+                                total=0,
+                                roots=root_labels,
+                                last_file=path.name,
+                            )
+                else:
+                    assert drive_creds is not None
+                    for meta in iter_drive_image_files(
+                        drive_creds,
+                        root.folder_id,
+                        self.settings.image_extensions,
+                    ):
+                        fid = meta["id"]
+                        logical = google_drive_logical_path(fid)
+                        tasks.append(
+                            _ScanWork(
+                                root_name=root.name,
+                                local_path=None,
+                                drive_file_id=fid,
+                                logical_path=logical,
+                                mtime=float(meta["mtime"] or 0.0),
+                                size_bytes=int(meta.get("size_bytes") or 0),
+                                label=str(meta.get("name") or fid),
+                            )
+                        )
+                        if len(tasks) % 400 == 0:
+                            self._progress_update(
+                                phase="enumerating",
+                                current=len(tasks),
+                                total=0,
+                                roots=root_labels,
+                                last_file=str(meta.get("name") or ""),
+                            )
 
             total_files = len(tasks)
             self._progress_update(
@@ -118,9 +181,9 @@ class PhotoScanner:
             cached_files = 0
             emit_every = max(1, total_files // 120) if total_files else 1
 
-            for index, (root, path) in enumerate(tasks):
+            for index, sw in enumerate(tasks):
                 scanned_files += 1
-                seen_paths.add(path)
+                seen_paths.add(sw.logical_path)
                 step = index + 1
                 if step == 1 or step == total_files or step % emit_every == 0:
                     self._progress_update(
@@ -128,23 +191,47 @@ class PhotoScanner:
                         current=step,
                         total=total_files,
                         roots=root_labels,
-                        last_file=path.name,
+                        last_file=sw.label,
                     )
                 try:
-                    stat = path.stat()
-                    cached = self.store.get_valid(path, stat.st_mtime, stat.st_size)
-                    thumbnail_exists = cached and (self.thumbnail_dir / f"{cached.thumbnail_id}.jpg").exists()
-                    if cached and thumbnail_exists:
-                        photos.append(cached)
-                        cached_files += 1
-                        continue
+                    if sw.local_path is not None:
+                        stat = sw.local_path.stat()
+                        cached = self.store.get_valid(sw.logical_path, stat.st_mtime, stat.st_size)
+                        thumbnail_exists = cached and (self.thumbnail_dir / f"{cached.thumbnail_id}.jpg").exists()
+                        if cached and thumbnail_exists:
+                            photos.append(cached)
+                            cached_files += 1
+                            continue
 
-                    analysis = analyze_photo(path, root.name, self.thumbnail_dir)
-                    self.store.upsert(analysis)
-                    photos.append(analysis)
-                    analyzed_files += 1
+                        analysis = analyze_photo(sw.local_path, sw.root_name, self.thumbnail_dir)
+                        self.store.upsert(analysis)
+                        photos.append(analysis)
+                        analyzed_files += 1
+                    else:
+                        assert drive_creds is not None and sw.drive_file_id is not None
+                        cached = self.store.get_valid(sw.logical_path, sw.mtime, sw.size_bytes)
+                        thumbnail_exists = cached and (self.thumbnail_dir / f"{cached.thumbnail_id}.jpg").exists()
+                        if cached and thumbnail_exists:
+                            photos.append(cached)
+                            cached_files += 1
+                            continue
+
+                        data = download_drive_file(drive_creds, sw.drive_file_id)
+                        mtime = sw.mtime
+                        size_bytes = len(data) if sw.size_bytes <= 0 else sw.size_bytes
+                        analysis = analyze_photo_bytes(
+                            data,
+                            sw.logical_path,
+                            sw.root_name,
+                            self.thumbnail_dir,
+                            mtime=mtime,
+                            size_bytes=size_bytes,
+                        )
+                        self.store.upsert(analysis)
+                        photos.append(analysis)
+                        analyzed_files += 1
                 except Exception as exc:
-                    errors.append(f"{path}: {exc}")
+                    errors.append(f"{sw.logical_path}: {exc}")
 
             deleted_cached_files = self.store.delete_missing_for_roots(
                 [root.name for root in selected_roots],
@@ -196,7 +283,7 @@ class PhotoScanner:
 
         return self.store.get_last_scan_finished_at()
 
-    def _select_roots(self, root_names: Iterable[str] | None) -> list[PhotoRoot]:
+    def _select_roots(self, root_names: Iterable[str] | None) -> list[ScanRoot]:
         """リクエストされたルート名を設定済みルートに解決します。
         Resolves requested root names to configured scan roots.
         """
@@ -292,17 +379,25 @@ class PhotoScanner:
         Converts one group into the dictionary shape consumed by the API/UI.
         """
 
-        sorted_photos = sorted(photos, key=lambda photo: (-photo.score, str(photo.path)))
-        recommended = _select_recommendations(sorted_photos, self.settings.recommendation_count)
-        captured_times = [photo.captured_at for photo in photos if photo.captured_at]
+        adjusted = apply_duplicate_score_policy(
+            photos,
+            settings=self.settings,
+            policy=self.settings.recommendation_policy,
+        )
+        sorted_adjusted = sorted(
+            adjusted,
+            key=lambda item: (-item.photo.score, str(item.photo.path)),
+        )
+        recommended = _select_recommendations(sorted_adjusted, self.settings.recommendation_count)
+        captured_times = [item.photo.captured_at for item in adjusted if item.photo.captured_at]
         return {
             "group_id": f"group-{group_id}",
             "count": len(photos),
-            "roots": sorted({photo.root_name for photo in photos}),
+            "roots": sorted({item.photo.root_name for item in adjusted}),
             "captured_start": min(captured_times).isoformat() if captured_times else None,
             "captured_end": max(captured_times).isoformat() if captured_times else None,
-            "recommended": [_serialize_photo(photo) for photo in recommended],
-            "photos": [_serialize_photo(photo) for photo in sorted_photos],
+            "recommended": [_serialize_photo(item) for item in recommended],
+            "photos": [_serialize_photo(item) for item in sorted_adjusted],
         }
 
 
@@ -335,20 +430,22 @@ class _DisjointSet:
             self.parent[right_root] = left_root
 
 
-def _select_recommendations(photos: list[PhotoAnalysis], count: int) -> list[PhotoAnalysis]:
-    """スコア順に並んだ写真からおすすめ上位を選びます。
+def _select_recommendations(photos: list[AdjustedPhoto], count: int) -> list[AdjustedPhoto]:
+    """スコア順に並んだ写真からおすすめ上位を選びます（0 点はおすすめに含めない）。
     Picks the top recommendations from photos already sorted by score.
     """
 
-    return photos[:count]
+    eligible = [item for item in photos if item.photo.score > 0]
+    return eligible[:count]
 
 
-def _serialize_photo(photo: PhotoAnalysis) -> dict:
+def _serialize_photo(item: AdjustedPhoto) -> dict:
     """1枚の解析結果をAPI/UI向けの辞書形式に変換します。
     Converts one analysis result into the dictionary shape consumed by the API/UI.
     """
 
-    return {
+    photo = item.photo
+    payload = {
         "path": str(photo.path),
         "basename": photo.basename,
         "root": photo.root_name,
@@ -364,6 +461,9 @@ def _serialize_photo(photo: PhotoAnalysis) -> dict:
         },
         "thumbnail_url": photo.thumbnail_url,
     }
+    if item.duplicate_penalized:
+        payload["duplicate_penalized"] = True
+    return payload
 
 
 def _timestamp_for_sort(photo: PhotoAnalysis) -> float:

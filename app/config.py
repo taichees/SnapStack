@@ -4,11 +4,17 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Union
 
 import yaml
 
-from app.runtime_store import read_runtime
+from app.runtime_store import google_drive_block_from_sources, read_recommendation_runtime, read_runtime
+from app.services.recommendation_policy import RecommendationPolicy
+from app.services.google_oauth import (
+    is_connected as google_oauth_token_exists,
+    oauth_client_configured,
+    resolve_oauth_client,
+)
 
 DEFAULT_IMAGE_EXTENSIONS = {
     ".jpg",
@@ -31,12 +37,23 @@ class PhotoRoot:
 
 
 @dataclass(frozen=True)
+class GoogleDrivePhotoRoot:
+    """OAuth 済み Google Drive 上のフォルダを1ルートとして扱います。"""
+
+    name: str
+    folder_id: str
+
+
+ScanRoot = Union[PhotoRoot, GoogleDrivePhotoRoot]
+
+
+@dataclass(frozen=True)
 class Settings:
     """アプリ全体で使う設定値をまとめます。
     Holds application-wide settings loaded from YAML or environment variables.
     """
 
-    roots: list[PhotoRoot]
+    roots: list[ScanRoot]
     managed_root_names: frozenset[str]
     ui_local_prefixes: tuple[Path, ...]
     data_dir: Path
@@ -44,6 +61,10 @@ class Settings:
     hash_distance_threshold: int
     burst_time_window_seconds: int
     recommendation_count: int
+    google_oauth_env_ready: bool
+    google_drive_scan_enabled: bool
+    recommendation_policy: RecommendationPolicy
+    cloud_root_names: frozenset[str]
 
 
 def _slugify(value: str) -> str:
@@ -119,6 +140,23 @@ def validate_ui_local_path(path: Path, prefixes: tuple[Path, ...]) -> Path:
     raise ValueError(f"パスは次のいずれかの配下である必要があります: {allowed}")
 
 
+def google_drive_logical_path(file_id: str) -> Path:
+    return Path(f"/__gdrive__/{file_id}")
+
+
+def _google_drive_root_from_config(config: dict[str, Any], data_dir: Path) -> GoogleDrivePhotoRoot | None:
+    block = google_drive_block_from_sources(config, data_dir)
+    if not isinstance(block, dict) or not block.get("enabled"):
+        return None
+    if resolve_oauth_client(data_dir) is None:
+        return None
+    if not google_oauth_token_exists(data_dir):
+        return None
+    name = sanitize_root_name(str(block.get("name") or "google-drive"))
+    fid = str(block.get("folder_id") or "root").strip() or "root"
+    return GoogleDrivePhotoRoot(name=name, folder_id=fid)
+
+
 def _runtime_photo_roots(
     *,
     data_dir: Path,
@@ -176,12 +214,31 @@ def load_settings() -> Settings:
         ui_prefixes=ui_prefixes,
         yaml_roots=yaml_roots,
     )
-    roots: list[PhotoRoot] = [*yaml_roots, *extra_locals]
+    drive_root = _google_drive_root_from_config(config, data_dir)
+    roots: list[ScanRoot] = [*yaml_roots, *extra_locals]
+    if drive_root is not None:
+        roots.append(drive_root)
 
     image_extensions = {
         str(ext).lower() if str(ext).startswith(".") else f".{str(ext).lower()}"
         for ext in config.get("image_extensions", DEFAULT_IMAGE_EXTENSIONS)
     }
+
+    google_ready = oauth_client_configured(data_dir)
+    gd_block = google_drive_block_from_sources(config, data_dir)
+    gd_scan_enabled = isinstance(gd_block, dict) and bool(gd_block.get("enabled"))
+
+    yaml_rec = config.get("recommendation")
+    rec_raw = read_recommendation_runtime(
+        data_dir,
+        yaml_block=yaml_rec if isinstance(yaml_rec, dict) else None,
+    )
+    rec_policy = RecommendationPolicy(
+        zero_score_for_duplicate_files=bool(rec_raw["zero_score_for_duplicate_files"]),
+        storage_priority=rec_raw["storage_priority"],  # type: ignore[arg-type]
+        same_file_max_hash_distance=int(rec_raw["same_file_max_hash_distance"]),
+    )
+    cloud_names = _cloud_root_names(roots, managed)
 
     return Settings(
         roots=roots,
@@ -192,4 +249,16 @@ def load_settings() -> Settings:
         hash_distance_threshold=int(config.get("hash_distance_threshold", 8)),
         burst_time_window_seconds=int(config.get("burst_time_window_seconds", 20)),
         recommendation_count=int(config.get("recommendation_count", 3)),
+        google_oauth_env_ready=google_ready,
+        google_drive_scan_enabled=gd_scan_enabled,
+        recommendation_policy=rec_policy,
+        cloud_root_names=cloud_names,
     )
+
+
+def _cloud_root_names(roots: list[ScanRoot], managed: frozenset[str]) -> frozenset[str]:
+    names: set[str] = set(managed)
+    for root in roots:
+        if isinstance(root, GoogleDrivePhotoRoot):
+            names.add(root.name)
+    return frozenset(names)

@@ -6,3 +6,6 @@ pillow-heif
 imagehash
 numpy
 PyYAML
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib

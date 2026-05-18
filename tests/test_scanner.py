@@ -4,8 +4,11 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from app.config import PhotoRoot, Settings
+from app.services.recommendation_policy import RecommendationPolicy
 from app.models import PhotoAnalysis
-from app.services.scanner import PhotoScanner
+from app.models import PhotoAnalysis
+from app.services.recommendation_policy import AdjustedPhoto
+from app.services.scanner import PhotoScanner, _select_recommendations
 
 
 def test_selects_multiple_requested_roots(tmp_path: Path) -> None:
@@ -15,6 +18,33 @@ def test_selects_multiple_requested_roots(tmp_path: Path) -> None:
     selected = scanner._select_roots(["archive", "camera"])
 
     assert [root.name for root in selected] == ["archive", "camera"]
+
+
+def test_recommendations_skip_zero_score(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, roots=["camera"])
+    hi = _photo("a.jpg", "0000000000000000", 0.9, datetime(2026, 5, 12, 10, 0, 0))
+    zero = PhotoAnalysis(
+        path=hi.path,
+        root_name=hi.root_name,
+        mtime=hi.mtime,
+        size_bytes=hi.size_bytes,
+        width=hi.width,
+        height=hi.height,
+        captured_at=hi.captured_at,
+        phash=hi.phash,
+        sharpness_score=0.0,
+        exposure_score=0.0,
+        contrast_score=0.0,
+        resolution_score=0.0,
+        score=0.0,
+        thumbnail_id="zero",
+    )
+    ranked = [
+        AdjustedPhoto(photo=zero, duplicate_penalized=True),
+        AdjustedPhoto(photo=hi),
+    ]
+    picked = _select_recommendations(ranked, settings.recommendation_count)
+    assert [p.photo.basename for p in picked] == ["a.jpg"]
 
 
 def test_groups_burst_photos_and_recommends_top_three(tmp_path: Path) -> None:
@@ -46,6 +76,14 @@ def _settings(tmp_path: Path, roots: list[str]) -> Settings:
         hash_distance_threshold=8,
         burst_time_window_seconds=20,
         recommendation_count=3,
+        google_oauth_env_ready=False,
+        google_drive_scan_enabled=False,
+        recommendation_policy=RecommendationPolicy(
+            zero_score_for_duplicate_files=False,
+            storage_priority="nas_first",
+            same_file_max_hash_distance=0,
+        ),
+        cloud_root_names=frozenset(),
     )
 
 
